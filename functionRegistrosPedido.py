@@ -332,6 +332,8 @@ Olá {user_name}! 👋
 Seu pedido chegou aqui na Ao Gosto Carnes e já está sendo montado. 🥩📦
 Pedimos um prazo de 30 minutos para montar o pedido. 😊
 
+⚠️ *Mensagem automática — não responda por aqui*. Para falar com nossa equipe, utilize a Central Oficial: *(31) 3461-3297*.
+
 📍Retirada: Av. Silviano Brandão, 685, Sagrada Família. (Basta subir o portão grande de garagem, temos estacionamento!)
 Ah, lembramos que os pedidos para retirada são guardados somente até o final do dia.
                 """.strip()
@@ -360,6 +362,8 @@ Olá {user_name}! 👋
 Seu pedido foi recebido pela *Ao Gosto Carnes* e já está em preparação! 🥩📦
 Pedimos um prazo de 30 minutos para montá-lo. 😊
 
+Para falar na Unidade Sion, basta chamar nesse número: *(31) 9 8311-2919*.
+
 _Informações de Retirada:_
 
 📆 *Data:* {values[26] or 'Não informada'}
@@ -374,24 +378,31 @@ Obrigado por escolher a *Ao Gosto Carnes*!
 Olá {user_name}! 👋
 
 Seu pedido chegou aqui na Ao Gosto Carnes e já está sendo montado. 🥩📦
-Pedimos um prazo de 30 minutos para montar o pedido. 😊
 
 📍Retirada: Av. Silviano Brandão, 685, Sagrada Família. (Basta subir o portão grande de garagem, temos estacionamento!)
-Ah, lembramos que os pedidos para retirada são guardados somente até o final do dia.
+
+⚠️ *Mensagem automática — não responda por aqui*.
+Para falar com nossa equipe, utilize a central oficial: *(31) 3461-3297*.
                 """.strip()
         else:
             mensagem = f"""
 Ei {user_name}! 👋
 
-Seu pedido na Ao Gosto Carnes foi confirmado e já estamos preparando tudo. Aqui está o endereço de entrega:
-📍{addressFull}
+Seu pedido na Ao Gosto Carnes foi *confirmado* e já estamos preparando tudo.
+Aqui está o endereço de entrega:
+📍 *{addressFull}*
+
+⚠️ *Mensagem automática — não responda por aqui*.
+Para falar com nossa equipe, utilize a central oficial: *(31) 3461-3297*.
 
 Se o endereço está correto, em breve sua caixinha laranja estará aí com você!
 
-O prazo de entrega varia de 30 minutos a 2 horas em BH e até 3 horas em outras localidades.
+⏰ O prazo de entrega varia de *30 minutos* a *2 horas* em BH e até 3 horas em outras localidades.
 Estamos empenhados em entregar o mais rápido possível! 😊
 
 Desejamos uma excelente experiência com nossos produtos!
+
+
             """.strip()
         logger.info(f"Enviando mensagem ao cliente do pedido {id_pedido}")
         enviar_mensagem_whatsapp(celular, mensagem)
@@ -443,47 +454,81 @@ def verificar_valores_dropdown(values, id_pedido):
 def processar_pedido_normal(values, pedido, addressFull, sheet, sheetAgendado, id_pedido, service, spreadsheet_key):
     from registroPedidosmanual import criar_pdf_invoice
 
-    values = verificar_valores_dropdown(values, id_pedido)
+    # Normaliza o ID do pedido para string (consistência com registered_orders)
+    id_pedido_str = normalize_id(id_pedido)
+    logger.debug(f"Processando pedido {id_pedido_str} com status={values[10]}, data_agendamento={values[26]}")
 
+    # Verifica valores de dropdown (colunas F, K, L)
+    values = verificar_valores_dropdown(values, id_pedido_str)
+
+    # Determina a aba correta com base no status e data de agendamento
     if values[10] == 'Agendado' and not checkValidateAgendado(values[26]):
-        logger.info(f"Pedido {id_pedido} agendado para o futuro, inserido na aba 'Agendados'")
+        logger.info(f"Pedido {id_pedido_str} agendado para o futuro, inserido na aba 'Agendados'")
         sheet_title = "Agendados"
         target_sheet = sheetAgendado
     else:
-        logger.info(f"Pedido {id_pedido} inserido na aba 'Novos Pedidos'")
+        logger.info(f"Pedido {id_pedido_str} inserido na aba 'Novos Pedidos'")
         sheet_title = "Novos Pedidos"
         target_sheet = sheet
 
     # Verifica se o pedido já existe na aba alvo (coluna A)
     column_a = target_sheet.col_values(1)
-    if str(id_pedido) in column_a:
-        logger.info(f"Pedido {id_pedido} já existe na aba '{sheet_title}', ignorando inserção, PDF e envio de mensagem.")
+    if id_pedido_str in column_a:
+        logger.info(f"Pedido {id_pedido_str} já existe na aba '{sheet_title}', ignorando inserção, PDF e envio de mensagem.")
         return
 
     # Próxima linha livre
     next_row = len(target_sheet.col_values(1)) + 1
 
+    # Garante que a aba tem colunas suficientes
     try:
-        # Usa write_row_with_template para preservar validações/dropdowns
+        sheet_metadata = service.spreadsheets().get(spreadsheetId=spreadsheet_key).execute()
+        for worksheet in sheet_metadata['sheets']:
+            if worksheet['properties']['title'] == sheet_title:
+                column_count = worksheet['properties']['gridProperties'].get('columnCount', 26)
+                if column_count < len(values):
+                    logger.warning(f"A aba '{sheet_title}' tem {column_count} colunas. Expandindo para {len(values)}.")
+                    service.spreadsheets().batchUpdate(
+                        spreadsheetId=spreadsheet_key,
+                        body={
+                            "requests": [{
+                                "updateSheetProperties": {
+                                    "properties": {
+                                        "sheetId": worksheet['properties']['sheetId'],
+                                        "gridProperties": {"columnCount": len(values)}
+                                    },
+                                    "fields": "gridProperties.columnCount"
+                                }
+                            }]
+                        }
+                    ).execute()
+    except Exception as e:
+        logger.error(f"Erro ao verificar/expandir colunas da aba '{sheet_title}' para pedido {id_pedido_str}: {str(e)}")
+        return
+
+    # Escreve a linha com formatação e validações preservadas
+    try:
         write_row_with_template(service, spreadsheet_key, sheet_title, next_row, values, template_row=2)
-        logger.info(f"Pedido {id_pedido} inserido com sucesso na aba '{sheet_title}', linha {next_row}")
+        logger.info(f"Pedido {id_pedido_str} inserido com sucesso na aba '{sheet_title}', linha {next_row}")
     except HttpError as e:
-        logger.error(f"Erro ao inserir pedido {id_pedido} na aba '{sheet_title}': {str(e)}")
+        logger.error(f"Erro ao inserir pedido {id_pedido_str} na aba '{sheet_title}': {str(e)}")
         return
 
     # Geração de PDF
     try:
-        logger.debug(f"Tentando gerar PDF para pedido {id_pedido}")
-        if criar_pdf_invoice(id_pedido, pedido, values[26], values[25], values[24]):
-            logger.info(f"PDF gerado com sucesso para pedido {id_pedido}")
+        logger.debug(f"Tentando gerar PDF para pedido {id_pedido_str}")
+        if criar_pdf_invoice(id_pedido_str, pedido, values[26], values[25], values[24]):
+            logger.info(f"PDF gerado com sucesso para pedido {id_pedido_str}")
         else:
-            logger.error(f"Falha ao gerar PDF para pedido {id_pedido} (função retornou False)")
+            logger.error(f"Falha ao gerar PDF para pedido {id_pedido_str} (função retornou False)")
     except Exception as e:
-        logger.error(f"Erro ao gerar PDF para pedido {id_pedido}: {str(e)}")
+        logger.error(f"Erro ao gerar PDF para pedido {id_pedido_str}: {str(e)}")
 
     # Envia mensagem WhatsApp
-    enviar_mensagem_cliente(values, pedido, addressFull, values[18])
-
+    try:
+        enviar_mensagem_cliente(values, pedido, addressFull, values[18])
+    except Exception as e:
+        logger.error(f"Erro ao enviar mensagem WhatsApp para pedido {id_pedido_str}: {str(e)}")
 
 def getDictPedidos(values):
     return {
