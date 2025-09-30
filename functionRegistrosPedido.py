@@ -108,8 +108,8 @@ def set_columns_as_text(service, spreadsheet_id, sheet_title, columns=(2, 27, 23
             "repeatCell": {
                 "range": {
                     "sheetId": sheet_id,
-                    "startRowIndex": 1,            # pula cabeçalho (linha 1)
-                    "endRowIndex": row_count,
+                    "startRowIndex": 0,       # inclui cabeçalho também
+                    "endRowIndex": row_count, # até o total de linhas
                     "startColumnIndex": c-1,
                     "endColumnIndex": c
                 },
@@ -120,6 +120,7 @@ def set_columns_as_text(service, spreadsheet_id, sheet_title, columns=(2, 27, 23
     service.spreadsheets().batchUpdate(
         spreadsheetId=spreadsheet_id, body={"requests": requests}
     ).execute()
+
 
 def normalize_id(order_id) -> str:
     """Normaliza IDs para string (evita duplicações por tipos diferentes)."""
