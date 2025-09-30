@@ -39,41 +39,87 @@ def _get_sheet_props(service, spreadsheet_id, title):
             return p["sheetId"], grid.get("rowCount", 1000), grid.get("columnCount", 26)
     raise ValueError(f"Aba '{title}' não encontrada")
 
-def write_row_with_template(service, spreadsheet_id, sheet_title, row_index, values, template_row=2, total_cols=None):
-    """
-    Escreve uma linha em 'sheet_title' copiando formatações/validações de template_row
-    e garantindo que o range bate com o número de colunas de 'values'.
-    """
 
-    # Se não passar total_cols, usar o tamanho real de values
+def write_row_with_template(
+    service, spreadsheet_id, sheet_title, row_index, values,
+    template_row=2, total_cols=None, text_cols=(2, 27)  # B=2, AA=27
+):
+    # Define range
     range_end_col = total_cols if total_cols is not None else len(values)
     last_col_letter = _col_label(range_end_col)
     range_str = f"{sheet_title}!A{row_index}:{last_col_letter}{row_index}"
 
-    # Se values tiver mais colunas do que o range, truncar
+    # Ajusta comprimento de values ao range
     if len(values) > range_end_col:
-        logger.warning(
-            f"Pedido: values tem {len(values)} colunas, mas o range foi até {range_end_col}. "
-            "Truncando automaticamente para evitar erro."
-        )
+        logger.warning(f"values tem {len(values)} colunas; truncando para {range_end_col}.")
         values = values[:range_end_col]
-
-    # Se values tiver menos colunas, preencher com vazio
     elif len(values) < range_end_col:
         values += [""] * (range_end_col - len(values))
 
-    body = {"values": [values]}
+    # 1) Copiar FORMATAÇÃO + VALIDAÇÃO da linha template para a linha destino
+    sheet_id, _, _ = _get_sheet_props(service, spreadsheet_id, sheet_title)
+    copy_src = {"sheetId": sheet_id,
+                "startRowIndex": template_row-1, "endRowIndex": template_row,
+                "startColumnIndex": 0, "endColumnIndex": range_end_col}
+    copy_dst = {"sheetId": sheet_id,
+                "startRowIndex": row_index-1, "endRowIndex": row_index,
+                "startColumnIndex": 0, "endColumnIndex": range_end_col}
 
-    try:
-        service.spreadsheets().values().update(
-            spreadsheetId=spreadsheet_id,
-            range=range_str,
-            valueInputOption="USER_ENTERED",
-            body=body
-        ).execute()
-        logger.info(f"Linha {row_index} escrita com sucesso na aba '{sheet_title}'")
-    except Exception as e:
-        logger.error(f"Erro ao escrever linha {row_index} na aba '{sheet_title}': {e}")
+    requests = [
+        {"copyPaste": {"source": copy_src, "destination": copy_dst, "pasteType": "PASTE_FORMAT"}},
+        {"copyPaste": {"source": copy_src, "destination": copy_dst, "pasteType": "PASTE_DATA_VALIDATION"}},
+    ]
+
+    # 2) Forçar número/format das colunas B e AA como TEXTO na linha que vamos preencher
+    for c in text_cols:
+        requests.append({
+            "repeatCell": {
+                "range": {
+                    "sheetId": sheet_id,
+                    "startRowIndex": row_index-1, "endRowIndex": row_index,
+                    "startColumnIndex": c-1, "endColumnIndex": c
+                },
+                "cell": {"userEnteredFormat": {"numberFormat": {"type": "TEXT"}}},
+                "fields": "userEnteredFormat.numberFormat"
+            }
+        })
+
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=spreadsheet_id, body={"requests": requests}
+    ).execute()
+
+    # 3) Escrever valores como RAW (sem parsing do Sheets)
+    body = {"values": [values]}
+    service.spreadsheets().values().update(
+        spreadsheetId=spreadsheet_id,
+        range=range_str,
+        valueInputOption="RAW",
+        body=body
+    ).execute()
+
+    logger.info(f"Linha {row_index} escrita com sucesso na aba '{sheet_title}'")
+
+
+def set_columns_as_text(service, spreadsheet_id, sheet_title, columns=(2, 27, 23)):
+    sheet_id, row_count, _ = _get_sheet_props(service, spreadsheet_id, sheet_title)
+    requests = []
+    for c in columns:
+        requests.append({
+            "repeatCell": {
+                "range": {
+                    "sheetId": sheet_id,
+                    "startRowIndex": 1,            # pula cabeçalho (linha 1)
+                    "endRowIndex": row_count,
+                    "startColumnIndex": c-1,
+                    "endColumnIndex": c
+                },
+                "cell": {"userEnteredFormat": {"numberFormat": {"type": "TEXT"}}},
+                "fields": "userEnteredFormat.numberFormat"
+            }
+        })
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=spreadsheet_id, body={"requests": requests}
+    ).execute()
 
 def normalize_id(order_id) -> str:
     """Normaliza IDs para string (evita duplicações por tipos diferentes)."""
@@ -779,6 +825,8 @@ def check_values(pedido):
         None, None, productList_str
     ]
 
+
+
     # Colunas finais: "", "", CUPOM_COD, CUPOM_VALOR_NUM, CUPOM_TIPO, GIFT_CARD
     values.extend(["", "", coupon_code, coupon_value, coupon_type, gift_card_discount, payment_account_stripe, effective_store_final, payment_account_pagarme])
 
@@ -793,12 +841,12 @@ def adicionar_pedido_ao_google_sheets(pedido, registered_orders, sheet, sheetAge
 
     # ====== EARLY CHECK ======
     if id_pedido_str in registered_orders:
-        logger.info(f"Pedido {id_pedido_str} já registrado, ignorando (early check)")
+        logger.info(f"Pedido {id_pedido_str} já registrado. ✅")
         return
 
     values = check_values(pedido)
     if not values:
-        logger.error(f"Falha ao processar pedido {id_pedido_str}: dados inválidos")
+        logger.error(f"Falha ao processar pedido {id_pedido_str}: dados inválidos ❌")
         return
 
     # Inicializa service ANTES de qualquer expansão
@@ -1041,21 +1089,32 @@ def main():
         client = gspread.authorize(Credentials.from_service_account_file(
             credentials_file, scopes=['https://www.googleapis.com/auth/spreadsheets']
         ))
+
+        # Blindagem: força colunas críticas como texto (B=2, AA=27, W=23)
+        for aba in ["Novos Pedidos", "Agendados", "CD Barreiro", "CD Sion"]:
+            set_columns_as_text(service, spreadsheet_key, aba, columns=(2, 27, 23))
+
+        # Abertura das abas
         sheet = client.open_by_key(spreadsheet_key).worksheet("Novos Pedidos")
         sheetAgendado = client.open_by_key(spreadsheet_key).worksheet("Agendados")
         sheetCDBarreiro = client.open_by_key(spreadsheet_key).worksheet("CD Barreiro")
         sheetCDSion = client.open_by_key(spreadsheet_key).worksheet("CD Sion")
+
     except Exception as e:
         logger.error(f"Erro ao inicializar planilha ou serviço: {str(e)}")
         return
 
+    # Carrega pedidos já registrados
     registered_orders = load_registered_orders(registered_orders_file)  # <- strings normalizadas
+
+    # Busca novos pedidos do WooCommerce
     pedidos = fetch_orders()
     for pedido in pedidos:
         adicionar_pedido_ao_google_sheets(
             pedido, registered_orders, sheet, sheetAgendado, sheetCDBarreiro, sheetCDSion,
             spreadsheet_key, client, registered_orders_file
         )
+
 
 if __name__ == "__main__":
     main()
