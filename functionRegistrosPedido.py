@@ -315,6 +315,16 @@ def enviar_mensagem_whatsapp(celular, mensagem):
         logger.error(f"Falha ao enviar mensagem WhatsApp para {celular}: {str(e)}")
         raise
 
+def enviar_erro_ao_gestor(id_pedido, erro):
+    """Envia mensagem ao WhatsApp do gestor com o erro e o ID do pedido."""
+    gestor_numero = "5531998501560"
+    mensagem = f"⚠️ Erro no processamento do pedido {id_pedido}: {str(erro)}"
+    try:
+        enviar_mensagem_whatsapp(gestor_numero, mensagem)
+        logger.info(f"Mensagem de erro enviada ao gestor para o pedido {id_pedido}")
+    except Exception as e:
+        logger.error(f"Falha ao enviar mensagem de erro ao gestor para o pedido {id_pedido}: {str(e)}")
+
 def enviar_mensagem_cliente(values, pedido, addressFull, unidade_retirada):
     id_pedido = pedido['id']
     user_name = values[4]
@@ -414,6 +424,7 @@ Desejamos uma excelente experiência com nossos produtos!
         enviar_mensagem_whatsapp(celular, mensagem)
     except Exception as e:
         logger.error(f"Falha ao enviar mensagem ao cliente do pedido {id_pedido}: {str(e)}")
+        enviar_erro_ao_gestor(id_pedido, str(e))
         raise
 
 def get_sheets_service(credentials_file):
@@ -424,6 +435,7 @@ def get_sheets_service(credentials_file):
         return build('sheets', 'v4', credentials=creds)
     except Exception as e:
         logger.error(f"Falha ao inicializar serviço do Google Sheets: {str(e)}")
+        enviar_erro_ao_gestor("N/A", str(e))
         raise
 
 def verificar_valores_dropdown(values, id_pedido):
@@ -500,6 +512,7 @@ def processar_pedido_normal(values, pedido, addressFull, sheet, sheetAgendado, i
                     ).execute()
     except Exception as e:
         logger.error(f"Erro ao verificar/expandir colunas da aba '{sheet_title}' para pedido {id_pedido_str}: {str(e)}")
+        enviar_erro_ao_gestor(id_pedido_str, str(e))
         return
 
     try:
@@ -507,6 +520,7 @@ def processar_pedido_normal(values, pedido, addressFull, sheet, sheetAgendado, i
         logger.info(f"Pedido {id_pedido_str} inserido com sucesso na aba '{sheet_title}', linha {next_row}")
     except HttpError as e:
         logger.error(f"Erro ao inserir pedido {id_pedido_str} na aba '{sheet_title}': {str(e)}")
+        enviar_erro_ao_gestor(id_pedido_str, str(e))
         return
 
     try:
@@ -515,13 +529,16 @@ def processar_pedido_normal(values, pedido, addressFull, sheet, sheetAgendado, i
             logger.info(f"PDF gerado com sucesso para pedido {id_pedido_str}")
         else:
             logger.error(f"Falha ao gerar PDF para pedido {id_pedido_str} (função retornou False)")
+            enviar_erro_ao_gestor(id_pedido_str, "Falha ao gerar PDF (função retornou False)")
     except Exception as e:
         logger.error(f"Erro ao gerar PDF para pedido {id_pedido_str}: {str(e)}")
+        enviar_erro_ao_gestor(id_pedido_str, str(e))
 
     try:
         enviar_mensagem_cliente(values, pedido, addressFull, values[18])
     except Exception as e:
         logger.error(f"Erro ao enviar mensagem WhatsApp para pedido {id_pedido_str}: {str(e)}")
+        enviar_erro_ao_gestor(id_pedido_str, str(e))
 
 def getDictPedidos(values):
     return {
@@ -570,6 +587,7 @@ def update_registered_orders(registered_orders, registered_orders_file):
                 logger.debug(f"Arquivo {registered_orders_file} atualizado com {len(set(normalized))} pedidos.")
     except Exception as e:
         logger.error(f"Erro ao atualizar {registered_orders_file}: {str(e)}")
+        enviar_erro_ao_gestor("N/A", str(e))
         raise
 
 def tentar_executar_com_retries(funcao, *args, max_tentativas=5, intervalo_tentativas=25):
@@ -578,6 +596,7 @@ def tentar_executar_com_retries(funcao, *args, max_tentativas=5, intervalo_tenta
             return funcao(*args)
         except requests.RequestException as e:
             logger.error(f"Tentativa {tentativa} falhou: erro de conexão ({str(e)})")
+            enviar_erro_ao_gestor("N/A", str(e))
             if tentativa < max_tentativas:
                 logger.info(f"Aguardando {intervalo_tentativas} segundos para tentar novamente...")
                 time.sleep(intervalo_tentativas)
@@ -586,6 +605,7 @@ def tentar_executar_com_retries(funcao, *args, max_tentativas=5, intervalo_tenta
                 return None
         except Exception as e:
             logger.error(f"Erro inesperado na tentativa {tentativa}: {str(e)}")
+            enviar_erro_ao_gestor("N/A", str(e))
             raise
 
 def check_values(pedido):
@@ -605,7 +625,6 @@ def check_values(pedido):
 
     id_pedido = pedido['id']
     if len(str(id_pedido)) < 6:
-        logger.warning(f"Pedido {id_pedido} ignorado: ID com menos de 6 dígitos")
         return None
     status = pedido['status']
     if status not in ['processing', 'saiu-pra-entrega', 'wc-agendado', 'lala-move']:
@@ -739,8 +758,10 @@ def check_values(pedido):
                             })
                 else:
                     logger.error(f"Falha ao buscar metadados do produto {product_id}: {resp.status_code} - {resp.text}")
+                    enviar_erro_ao_gestor(id_pedido, f"Falha ao buscar metadados do produto {product_id}: {resp.status_code} - {resp.text}")
             except requests.RequestException as e:
                 logger.error(f"Erro ao buscar metadados do produto {product_id}: {str(e)}")
+                enviar_erro_ao_gestor(id_pedido, str(e))
 
         for meta in item.get('meta_data', []):
             key = meta.get('display_key', meta.get('key', ''))
@@ -798,6 +819,7 @@ def check_values(pedido):
                             pass
                     except Exception as e:
                         logger.warning(f"Falha ao interpretar coupon_info para pedido {pedido.get('id')}: {e}")
+                        enviar_erro_ao_gestor(id_pedido, str(e))
             if not found_info:
                 coupon_value = str(discount_value)
                 coupon_type = discount_type or coupon_type
@@ -867,13 +889,16 @@ def adicionar_pedido_ao_google_sheets(pedido, registered_orders, sheet, sheetAge
 
     values = check_values(pedido)
     if not values:
-        logger.error(f"Falha ao processar pedido {id_pedido_str}: dados inválidos ❌")
+        if len(str(id_pedido)) >= 6:
+            logger.error(f"Falha ao processar pedido {id_pedido_str}: dados inválidos ❌")
+            enviar_erro_ao_gestor(id_pedido_str, "Dados inválidos")
         return
 
     try:
         service = get_sheets_service('C:/Users/ESCRITORIO/PycharmProjects/Delivery 2.0/impressao-belvedere-8a876abef441.json')
     except Exception as e:
         logger.error(f"Falha ao inicializar serviço do Google Sheets para pedido {id_pedido_str}: {str(e)}")
+        enviar_erro_ao_gestor(id_pedido_str, str(e))
         return
 
     try:
@@ -900,6 +925,7 @@ def adicionar_pedido_ao_google_sheets(pedido, registered_orders, sheet, sheetAge
                     ).execute()
     except Exception as e:
         logger.error(f"Erro ao verificar/expandir colunas da planilha para pedido {id_pedido_str}: {str(e)}")
+        enviar_erro_ao_gestor(id_pedido_str, str(e))
         return
 
     values = verificar_valores_dropdown(values, id_pedido_str)
@@ -922,6 +948,7 @@ def adicionar_pedido_ao_google_sheets(pedido, registered_orders, sheet, sheetAge
                     values[10] = "Agendado"
             except ValueError:
                 logger.warning(f"Data de agendamento inválida para pedido {id_pedido_str}: {scheduled_date}")
+                enviar_erro_ao_gestor(id_pedido_str, f"Data de agendamento inválida: {scheduled_date}")
                 is_future_date = False
 
         if is_future_date:
@@ -940,6 +967,7 @@ def adicionar_pedido_ao_google_sheets(pedido, registered_orders, sheet, sheetAge
                 logger.info(f"Pedido {id_pedido_str} inserido na aba 'Agendados', linha {next_row}")
             except Exception as e:
                 logger.error(f"Erro ao inserir pedido {id_pedido_str} na aba 'Agendados': {str(e)}")
+                enviar_erro_ao_gestor(id_pedido_str, str(e))
                 return
 
             try:
@@ -947,9 +975,14 @@ def adicionar_pedido_ao_google_sheets(pedido, registered_orders, sheet, sheetAge
                     logger.info(f"PDF gerado com sucesso para pedido {id_pedido_str} (Agendado)")
             except Exception as e:
                 logger.error(f"Erro ao gerar PDF para pedido {id_pedido_str} (Agendado): {str(e)}")
+                enviar_erro_ao_gestor(id_pedido_str, str(e))
 
-            addressFull = f"{pedido['billing']['address_1']}, {values[13]} / {pedido['billing']['address_2']}, {pedido['billing']['neighborhood']} - {pedido['billing']['city']} | Cep: {pedido['billing']['postcode']}"
-            enviar_mensagem_cliente(values, pedido, addressFull, values[18])
+            try:
+                addressFull = f"{pedido['billing']['address_1']}, {values[13]} / {pedido['billing']['address_2']}, {pedido['billing']['neighborhood']} - {pedido['billing']['city']} | Cep: {pedido['billing']['postcode']}"
+                enviar_mensagem_cliente(values, pedido, addressFull, values[18])
+            except Exception as e:
+                logger.error(f"Erro ao enviar mensagem ao cliente para pedido {id_pedido_str}: {str(e)}")
+                enviar_erro_ao_gestor(id_pedido_str, str(e))
 
             registered_orders.add(id_pedido_str)
             update_registered_orders(registered_orders, registered_orders_file)
@@ -994,13 +1027,18 @@ def adicionar_pedido_ao_google_sheets(pedido, registered_orders, sheet, sheetAge
                 write_row_with_template(service, spreadsheet_key, "CD Barreiro", next_row, values, template_row=2)
                 logger.info(f"Pedido {id_pedido_str} inserido na aba 'CD Barreiro', linha {next_row}")
 
-                enviar_mensagem_cliente(values, pedido, addressFull, "Unidade Barreiro")
+                try:
+                    enviar_mensagem_cliente(values, pedido, addressFull, "Unidade Barreiro")
+                except Exception as e:
+                    logger.error(f"Erro ao enviar mensagem ao cliente para pedido {id_pedido_str}: {str(e)}")
+                    enviar_erro_ao_gestor(id_pedido_str, str(e))
 
                 registered_orders.add(id_pedido_str)
                 update_registered_orders(registered_orders, registered_orders_file)
                 return
             except Exception as e:
                 logger.error(f"Erro no fluxo CD Barreiro para pedido {id_pedido_str}: {str(e)}")
+                enviar_erro_ao_gestor(id_pedido_str, str(e))
                 registered_orders.add(id_pedido_str)
                 update_registered_orders(registered_orders, registered_orders_file)
                 return
@@ -1033,13 +1071,18 @@ def adicionar_pedido_ao_google_sheets(pedido, registered_orders, sheet, sheetAge
 
                 logger.info(f"Pedido {id_pedido_str} inserido na aba 'CD Sion', linha {next_row}")
 
-                enviar_mensagem_cliente(values, pedido, addressFull, "Unidade Sion")
+                try:
+                    enviar_mensagem_cliente(values, pedido, addressFull, "Unidade Sion")
+                except Exception as e:
+                    logger.error(f"Erro ao enviar mensagem ao cliente para pedido {id_pedido_str}: {str(e)}")
+                    enviar_erro_ao_gestor(id_pedido_str, str(e))
 
                 registered_orders.add(id_pedido_str)
                 update_registered_orders(registered_orders, registered_orders_file)
                 return
             except Exception as e:
                 logger.error(f"Erro no fluxo CD Sion para pedido {id_pedido_str}: {str(e)}")
+                enviar_erro_ao_gestor(id_pedido_str, str(e))
                 registered_orders.add(id_pedido_str)
                 update_registered_orders(registered_orders, registered_orders_file)
                 return
@@ -1053,6 +1096,7 @@ def adicionar_pedido_ao_google_sheets(pedido, registered_orders, sheet, sheetAge
                 ], f"Método de pagamento inesperado: {values[5]}"
             except AssertionError as e:
                 logger.error(f"Falha ao processar pedido {id_pedido_str}: {str(e)}")
+                enviar_erro_ao_gestor(id_pedido_str, str(e))
                 return
 
             if pedido_hora >= hora_fecha_cd and not is_future_date:
@@ -1076,6 +1120,7 @@ def adicionar_pedido_ao_google_sheets(pedido, registered_orders, sheet, sheetAge
                     logger.info(f"Pedido {id_pedido_str} inserido na aba 'Agendados', linha {next_row}")
                 except Exception as e:
                     logger.error(f"Erro ao inserir pedido {id_pedido_str} na aba 'Agendados': {str(e)}")
+                    enviar_erro_ao_gestor(id_pedido_str, str(e))
                     return
 
                 try:
@@ -1083,8 +1128,13 @@ def adicionar_pedido_ao_google_sheets(pedido, registered_orders, sheet, sheetAge
                         logger.info(f"PDF gerado com sucesso para pedido {id_pedido_str} (Agendado)")
                 except Exception as e:
                     logger.error(f"Erro ao gerar PDF para pedido {id_pedido_str} (Agendado): {str(e)}")
+                    enviar_erro_ao_gestor(id_pedido_str, str(e))
 
-                enviar_mensagem_cliente(values, pedido, addressFull, values[18])
+                try:
+                    enviar_mensagem_cliente(values, pedido, addressFull, values[18])
+                except Exception as e:
+                    logger.error(f"Erro ao enviar mensagem ao cliente para pedido {id_pedido_str}: {str(e)}")
+                    enviar_erro_ao_gestor(id_pedido_str, str(e))
 
                 registered_orders.add(id_pedido_str)
                 update_registered_orders(registered_orders, registered_orders_file)
@@ -1099,6 +1149,7 @@ def adicionar_pedido_ao_google_sheets(pedido, registered_orders, sheet, sheetAge
                     logger.info(f"Pedido {id_pedido_str} inserido na aba 'Novos Pedidos', linha {next_row}")
                 except Exception as e:
                     logger.error(f"Erro ao inserir pedido {id_pedido_str} na aba 'Novos Pedidos': {str(e)}")
+                    enviar_erro_ao_gestor(id_pedido_str, str(e))
                     return
 
                 try:
@@ -1107,14 +1158,20 @@ def adicionar_pedido_ao_google_sheets(pedido, registered_orders, sheet, sheetAge
                         logger.info(f"PDF gerado com sucesso para pedido {id_pedido_str}")
                 except Exception as e:
                     logger.error(f"Erro ao gerar PDF para pedido {id_pedido_str}: {str(e)}")
+                    enviar_erro_ao_gestor(id_pedido_str, str(e))
 
-                enviar_mensagem_cliente(values, pedido, addressFull, values[18])
+                try:
+                    enviar_mensagem_cliente(values, pedido, addressFull, values[18])
+                except Exception as e:
+                    logger.error(f"Erro ao enviar mensagem ao cliente para pedido {id_pedido_str}: {str(e)}")
+                    enviar_erro_ao_gestor(id_pedido_str, str(e))
 
                 registered_orders.add(id_pedido_str)
                 update_registered_orders(registered_orders, registered_orders_file)
 
     except Exception as e:
         logger.error(f"Falha ao processar pedido {id_pedido_str}: {str(e)}")
+        enviar_erro_ao_gestor(id_pedido_str, str(e))
 
 def main():
     spreadsheet_key = "1dYwkJXVHXXx__cYMd-xUoWnDNZd58xIvKVfLHJMYF_c"
@@ -1137,6 +1194,7 @@ def main():
 
     except Exception as e:
         logger.error(f"Erro ao inicializar planilha ou serviço: {str(e)}")
+        enviar_erro_ao_gestor("N/A", str(e))
         return
 
     registered_orders = load_registered_orders(registered_orders_file)
