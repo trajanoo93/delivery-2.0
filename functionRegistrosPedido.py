@@ -39,10 +39,9 @@ def _get_sheet_props(service, spreadsheet_id, title):
             return p["sheetId"], grid.get("rowCount", 1000), grid.get("columnCount", 26)
     raise ValueError(f"Aba '{title}' não encontrada")
 
-
 def write_row_with_template(
     service, spreadsheet_id, sheet_title, row_index, values,
-    template_row=2, total_cols=None, text_cols=(2, 27)  # B=2, AA=27
+    template_row=2, total_cols=None, text_cols=(2, 27)
 ):
     # Define range
     range_end_col = total_cols if total_cols is not None else len(values)
@@ -99,7 +98,6 @@ def write_row_with_template(
 
     logger.info(f"Linha {row_index} escrita com sucesso na aba '{sheet_title}'")
 
-
 def set_columns_as_text(service, spreadsheet_id, sheet_title, columns=(2, 27, 23)):
     sheet_id, row_count, _ = _get_sheet_props(service, spreadsheet_id, sheet_title)
     requests = []
@@ -108,8 +106,8 @@ def set_columns_as_text(service, spreadsheet_id, sheet_title, columns=(2, 27, 23
             "repeatCell": {
                 "range": {
                     "sheetId": sheet_id,
-                    "startRowIndex": 0,       # inclui cabeçalho também
-                    "endRowIndex": row_count, # até o total de linhas
+                    "startRowIndex": 0,
+                    "endRowIndex": row_count,
                     "startColumnIndex": c-1,
                     "endColumnIndex": c
                 },
@@ -120,7 +118,6 @@ def set_columns_as_text(service, spreadsheet_id, sheet_title, columns=(2, 27, 23
     service.spreadsheets().batchUpdate(
         spreadsheetId=spreadsheet_id, body={"requests": requests}
     ).execute()
-
 
 def normalize_id(order_id) -> str:
     """Normaliza IDs para string (evita duplicações por tipos diferentes)."""
@@ -141,16 +138,14 @@ def safe_parse_coupon_info(raw):
     s = str(raw).strip()
     if not s:
         return None
-    # Tenta JSON
     try:
         return json.loads(s)
     except Exception:
         pass
-    # Tenta literal_eval (string estilo Python)
     try:
         return literal_eval(s)
     except Exception:
-        return s  # pode ser só um código de cupom simples
+        return s
 
 # =========================
 # Configuração do Logging
@@ -173,7 +168,7 @@ file_formatter = logging.Formatter(
 file_handler.setFormatter(file_formatter)
 
 console_handler = logging.StreamHandler()
-console_handler.setLevel(logging.DEBUG)  # Mudado para DEBUG para mais detalhes
+console_handler.setLevel(logging.DEBUG)
 console_formatter = colorlog.ColoredFormatter(
     "%(log_color)s%(levelname)s: %(message)s",
     log_colors={
@@ -220,9 +215,9 @@ def file_lock(file_path):
 def fetch_orders():
     """Busca os últimos 5 pedidos com status 'processing' modificados na última hora."""
     base_url = "https://aogosto.com.br/delivery/wp-json/wc/v3/orders"
-    modified_after = (datetime.now() - timedelta(hours=1)).isoformat()  # Reduzido para 1 hora para evitar re-fetchs
+    modified_after = (datetime.now() - timedelta(hours=1)).isoformat()
     params = {
-        'per_page': 5,  # Voltei para 5 para evitar o erro 500; teste com 10 depois de fixar o servidor
+        'per_page': 5,
         'order': 'desc',
         'orderby': 'modified',
         'status': 'processing',
@@ -257,7 +252,7 @@ def separar_numero_endereco(endereco):
     return endereco, None
 
 def getLatLong(endereco):
-    return None  # Implemente geocodificação se necessário
+    return None
 
 def check_status(delivery_time, delivery_date):
     tz = pytz.timezone('America/Sao_Paulo')
@@ -285,24 +280,37 @@ def check_status(delivery_time, delivery_date):
 
 def checkValidateAgendado(delivery_date):
     tz = pytz.timezone('America/Sao_Paulo')
-    return delivery_date == datetime.now(tz).strftime("%Y-%m-%d")
+    today = datetime.now(tz).date()
+    try:
+        delivery_date_dt = datetime.strptime(delivery_date, "%Y-%m-%d").date()
+        return delivery_date_dt == today
+    except ValueError:
+        logger.warning(f"Data inválida para validação de agendamento: {delivery_date}")
+        return False
 
 def enviar_mensagem_whatsapp(celular, mensagem):
     if not celular or not celular.isdigit() or len(celular) < 10:
         logger.error(f"Falha ao enviar mensagem WhatsApp: número de celular inválido ({celular})")
         raise ValueError(f"Número de celular inválido: {celular}")
 
-    url = "https://api.wzap.chat/v1/messages"
-    payload = {"phone": celular, "message": mensagem}
+    # URL da Evolution API (ajuste o host/porta se mudar)
+    url = "http://82.25.71.135:8080/message/sendText/central_delivery"
+
+    payload = {
+        "number": celular,   # precisa estar no formato 5531999999999
+        "text": mensagem
+    }
+
     headers = {
         "Content-Type": "application/json",
-        "Token": "7343607cd11509da88407ea89353ebdd8a79bdf9c3152da4025274c08c370b7b90ab0b68307d28cf"
+        "apikey": "3f0d87b1-0c4a-4e9c-bf14-9a07f6b7e9d3"
     }
+
     try:
         response = requests.post(url, json=payload, headers=headers, timeout=10)
         response.raise_for_status()
-        logger.info(f"Mensagem WhatsApp enviada com sucesso para {celular}")
-        return response
+        logger.info(f"Mensagem WhatsApp enviada com sucesso para {celular} via Evolution API")
+        return response.json()
     except requests.RequestException as e:
         logger.error(f"Falha ao enviar mensagem WhatsApp para {celular}: {str(e)}")
         raise
@@ -401,8 +409,6 @@ Se o endereço está correto, em breve sua caixinha laranja estará aí com voc�
 Estamos empenhados em entregar o mais rápido possível! 😊
 
 Desejamos uma excelente experiência com nossos produtos!
-
-
             """.strip()
         logger.info(f"Enviando mensagem ao cliente do pedido {id_pedido}")
         enviar_mensagem_whatsapp(celular, mensagem)
@@ -421,10 +427,6 @@ def get_sheets_service(credentials_file):
         raise
 
 def verificar_valores_dropdown(values, id_pedido):
-    """
-    Verifica se os valores das colunas F (Pagamento), K (Status) e L (Entregador) são válidos.
-    Retorna os valores ajustados ou gera um aviso se houver incompatibilidade.
-    """
     valid_payment_methods = [
         "Cartão", "Dinheiro", "Pix", "Vale Alimentação", "V.A", "Crédito Site",
         "Cartão Presente Ao Gosto Card", "Sem método de pagamento"
@@ -454,14 +456,11 @@ def verificar_valores_dropdown(values, id_pedido):
 def processar_pedido_normal(values, pedido, addressFull, sheet, sheetAgendado, id_pedido, service, spreadsheet_key):
     from registroPedidosmanual import criar_pdf_invoice
 
-    # Normaliza o ID do pedido para string (consistência com registered_orders)
     id_pedido_str = normalize_id(id_pedido)
     logger.debug(f"Processando pedido {id_pedido_str} com status={values[10]}, data_agendamento={values[26]}")
 
-    # Verifica valores de dropdown (colunas F, K, L)
     values = verificar_valores_dropdown(values, id_pedido_str)
 
-    # Determina a aba correta com base no status e data de agendamento
     if values[10] == 'Agendado' and not checkValidateAgendado(values[26]):
         logger.info(f"Pedido {id_pedido_str} agendado para o futuro, inserido na aba 'Agendados'")
         sheet_title = "Agendados"
@@ -471,16 +470,13 @@ def processar_pedido_normal(values, pedido, addressFull, sheet, sheetAgendado, i
         sheet_title = "Novos Pedidos"
         target_sheet = sheet
 
-    # Verifica se o pedido já existe na aba alvo (coluna A)
     column_a = target_sheet.col_values(1)
     if id_pedido_str in column_a:
         logger.info(f"Pedido {id_pedido_str} já existe na aba '{sheet_title}', ignorando inserção, PDF e envio de mensagem.")
         return
 
-    # Próxima linha livre
     next_row = len(target_sheet.col_values(1)) + 1
 
-    # Garante que a aba tem colunas suficientes
     try:
         sheet_metadata = service.spreadsheets().get(spreadsheetId=spreadsheet_key).execute()
         for worksheet in sheet_metadata['sheets']:
@@ -506,7 +502,6 @@ def processar_pedido_normal(values, pedido, addressFull, sheet, sheetAgendado, i
         logger.error(f"Erro ao verificar/expandir colunas da aba '{sheet_title}' para pedido {id_pedido_str}: {str(e)}")
         return
 
-    # Escreve a linha com formatação e validações preservadas
     try:
         write_row_with_template(service, spreadsheet_key, sheet_title, next_row, values, template_row=2)
         logger.info(f"Pedido {id_pedido_str} inserido com sucesso na aba '{sheet_title}', linha {next_row}")
@@ -514,7 +509,6 @@ def processar_pedido_normal(values, pedido, addressFull, sheet, sheetAgendado, i
         logger.error(f"Erro ao inserir pedido {id_pedido_str} na aba '{sheet_title}': {str(e)}")
         return
 
-    # Geração de PDF
     try:
         logger.debug(f"Tentando gerar PDF para pedido {id_pedido_str}")
         if criar_pdf_invoice(id_pedido_str, pedido, values[26], values[25], values[24]):
@@ -524,7 +518,6 @@ def processar_pedido_normal(values, pedido, addressFull, sheet, sheetAgendado, i
     except Exception as e:
         logger.error(f"Erro ao gerar PDF para pedido {id_pedido_str}: {str(e)}")
 
-    # Envia mensagem WhatsApp
     try:
         enviar_mensagem_cliente(values, pedido, addressFull, values[18])
     except Exception as e:
@@ -541,7 +534,6 @@ def getDictPedidos(values):
     }
 
 def load_registered_orders(registered_orders_file):
-    """Lê o JSON e SEMPRE retorna set de strings (normalizadas)."""
     try:
         with file_lock(registered_orders_file):
             with open(registered_orders_file, 'r', encoding='utf-8') as file:
@@ -570,7 +562,6 @@ def load_registered_orders(registered_orders_file):
         return set()
 
 def update_registered_orders(registered_orders, registered_orders_file):
-    """Escreve SEMPRE como lista de strings normalizadas (evita mistura int/str)."""
     try:
         normalized = [normalize_id(x) for x in registered_orders]
         with file_lock(registered_orders_file):
@@ -641,12 +632,10 @@ def check_values(pedido):
 
     shipping_store = effective_store_final or store_final or ""
 
-    # Validar formato de delivery_time
     if delivery_time and not re.match(r'^\d{2}:\d{2} - \d{2}:\d{2}$', delivery_time):
         logger.warning(f"Formato de delivery_time inválido para pedido {id_pedido}: {delivery_time}")
         delivery_time = None
 
-    # Validar e converter datas
     if delivery_date:
         delivery_date = convert_data(delivery_date)
         if delivery_date and not re.match(r'^\d{4}-\d{2}-\d{2}$', delivery_date):
@@ -664,7 +653,6 @@ def check_values(pedido):
         pedido['billing']['number'] = numero
     endereco_final = limpar_endereco(endereco_limpo)
 
-    # Normalizar e mapear método de pagamento
     payment_method = pedido['payment_method'].strip()
     logger.info(f"Valor bruto de payment_method para pedido {id_pedido}: '{payment_method}'")
     payment_method_mapping = {
@@ -776,7 +764,7 @@ def check_values(pedido):
 
     coupon_code = ""
     coupon_value = ""
-    coupon_type = ""  # percent | fixed_cart | etc
+    coupon_type = ""
     if pedido.get('coupon_lines'):
         for coupon in pedido['coupon_lines']:
             coupon_code = coupon.get('code', '') or coupon_code
@@ -789,7 +777,6 @@ def check_values(pedido):
                     ci = safe_parse_coupon_info(meta.get('value'))
                     try:
                         if isinstance(ci, (list, tuple)) and len(ci) >= 4:
-                            # compatível com sua lógica anterior: [.., .., tipo, valor]
                             valor = ci[3]
                             tipo = ci[2]
                             coupon_value = str(valor)
@@ -797,7 +784,6 @@ def check_values(pedido):
                             found_info = True
                             break
                         elif isinstance(ci, dict):
-                            # tenta chaves comuns
                             val = ci.get('amount') or ci.get('value') or ci.get('discount') or ci.get('discount_value')
                             typ = ci.get('type') or ci.get('discount_type')
                             if val is not None:
@@ -809,16 +795,13 @@ def check_values(pedido):
                             if found_info:
                                 break
                         elif isinstance(ci, str) and ci:
-                            # veio apenas código em string; sem valor/tipo aqui
                             pass
                     except Exception as e:
                         logger.warning(f"Falha ao interpretar coupon_info para pedido {pedido.get('id')}: {e}")
-                    # continua laço; se não achou, cai no fallback abaixo
-
             if not found_info:
-                coupon_value = str(discount_value)  # fallback: usa o que vem no próprio coupon
+                coupon_value = str(discount_value)
                 coupon_type = discount_type or coupon_type
-            break  # só considera o primeiro cupom
+            break
 
     gift_card_discount = ""
     if pedido.get('fee_lines'):
@@ -827,26 +810,22 @@ def check_values(pedido):
                 gift_card_discount = fee.get('total', '')
                 break
 
-    # ID normalizado para evitar diferenças de tipo
     id_pedido_str = normalize_id(id_pedido)
 
-    # Formatar horário de agendamento (coluna Z, índice 25) como "HH:MM - HH:MM"
     horario_agendamento = delivery_time if delivery_time else pickup_time
     if horario_agendamento:
         if not re.match(r'^\d{2}:\d{2} - \d{2}:\d{2}$', horario_agendamento):
             try:
-                # Tenta interpretar como um único horário e criar um range padrão (ex: +3 horas)
                 hora = datetime.strptime(horario_agendamento, "%H:%M").time()
                 hora_inicio = hora.strftime("%H:%M")
                 hora_fim = (datetime.combine(datetime.today(), hora) + timedelta(hours=3)).strftime("%H:%M")
                 horario_agendamento = f"{hora_inicio} - {hora_fim}"
             except ValueError:
                 logger.warning(f"Formato de horário inválido para pedido {id_pedido}: {horario_agendamento}")
-                horario_agendamento = "12:00 - 15:00"  # Padrão caso falhe
+                horario_agendamento = "12:00 - 15:00"
     else:
-        horario_agendamento = "12:00 - 15:00"  # Padrão se não houver horário
+        horario_agendamento = "12:00 - 15:00"
 
-    # Formatar data de agendamento (coluna AA, índice 26) como "YYYY-MM-DD"
     data_agendamento = delivery_date if delivery_date else pickup_date
     if data_agendamento:
         if not re.match(r'^\d{4}-\d{2}-\d{2}$', data_agendamento):
@@ -860,20 +839,17 @@ def check_values(pedido):
         data_agendamento = datetime.now(pytz.timezone('America/Sao_Paulo')).strftime("%Y-%m-%d")
 
     values = [
-        id_pedido_str,  # <- string normalizada
+        id_pedido_str,
         data, horario, pedido['billing']['neighborhood'], nome_cliente,
         payment_method, valor_total, valor_total, billing_company, taxa_entrega,
         status_atualizado, '-', endereco_final, pedido['billing'].get('number', ''),
         pedido['billing']['postcode'], pedido['billing']['address_2'], latitude, longitude,
         shipping_store, None, pedido['billing']['city'], '', celular, pedido['customer_note'],
-        delivery_type, horario_agendamento,  # Coluna Z (índice 25)
-        data_agendamento,  # Coluna AA (índice 26)
+        delivery_type, horario_agendamento,
+        data_agendamento,
         None, None, productList_str
     ]
 
-
-
-    # Colunas finais: "", "", CUPOM_COD, CUPOM_VALOR_NUM, CUPOM_TIPO, GIFT_CARD
     values.extend(["", "", coupon_code, coupon_value, coupon_type, gift_card_discount, payment_account_stripe, effective_store_final, payment_account_pagarme])
 
     return values
@@ -882,10 +858,9 @@ def adicionar_pedido_ao_google_sheets(pedido, registered_orders, sheet, sheetAge
                                       spreadsheet_key, client, registered_orders_file):
     from registroPedidosmanual import criar_pdf_invoice
     id_pedido = pedido['id']
-    id_pedido_str = normalize_id(id_pedido)  # <- normalizado
+    id_pedido_str = normalize_id(id_pedido)
     logger.info(f"Processando pedido {id_pedido_str}")
 
-    # ====== EARLY CHECK ======
     if id_pedido_str in registered_orders:
         logger.info(f"Pedido {id_pedido_str} já registrado. ✅")
         return
@@ -895,14 +870,12 @@ def adicionar_pedido_ao_google_sheets(pedido, registered_orders, sheet, sheetAge
         logger.error(f"Falha ao processar pedido {id_pedido_str}: dados inválidos ❌")
         return
 
-    # Inicializa service ANTES de qualquer expansão
     try:
         service = get_sheets_service('C:/Users/ESCRITORIO/PycharmProjects/Delivery 2.0/impressao-belvedere-8a876abef441.json')
     except Exception as e:
         logger.error(f"Falha ao inicializar serviço do Google Sheets para pedido {id_pedido_str}: {str(e)}")
         return
 
-    # Garante colunas mínimas para TODAS as abas (expandir para len(values))
     try:
         sheet_metadata = service.spreadsheets().get(spreadsheetId=spreadsheet_key).execute()
         for worksheet in sheet_metadata['sheets']:
@@ -929,15 +902,57 @@ def adicionar_pedido_ao_google_sheets(pedido, registered_orders, sheet, sheetAge
         logger.error(f"Erro ao verificar/expandir colunas da planilha para pedido {id_pedido_str}: {str(e)}")
         return
 
-    # Ajusta dropdowns
     values = verificar_valores_dropdown(values, id_pedido_str)
 
     logger.debug(f"Valores para pedido {id_pedido_str}: {values}")
 
     try:
-        # Segurança extra (deduplication)
         if id_pedido_str in registered_orders:
             logger.info(f"Pedido {id_pedido_str} já registrado, ignorando (dedup)")
+            return
+
+        scheduled_date = values[26]
+        is_future_date = False
+        if scheduled_date:
+            try:
+                scheduled_date_dt = datetime.strptime(scheduled_date, "%Y-%m-%d").date()
+                tz = pytz.timezone('America/Sao_Paulo')
+                is_future_date = scheduled_date_dt > datetime.now(tz).date()
+                if is_future_date:
+                    values[10] = "Agendado"
+            except ValueError:
+                logger.warning(f"Data de agendamento inválida para pedido {id_pedido_str}: {scheduled_date}")
+                is_future_date = False
+
+        if is_future_date:
+            sheet_title = "Agendados"
+            target_sheet = sheetAgendado
+            column_a = target_sheet.col_values(1)
+            if id_pedido_str in column_a:
+                logger.info(f"Pedido {id_pedido_str} já existe na aba 'Agendados', ignorando inserção.")
+                registered_orders.add(id_pedido_str)
+                update_registered_orders(registered_orders, registered_orders_file)
+                return
+
+            next_row = len(target_sheet.col_values(1)) + 1
+            try:
+                write_row_with_template(service, spreadsheet_key, sheet_title, next_row, values, template_row=2)
+                logger.info(f"Pedido {id_pedido_str} inserido na aba 'Agendados', linha {next_row}")
+            except Exception as e:
+                logger.error(f"Erro ao inserir pedido {id_pedido_str} na aba 'Agendados': {str(e)}")
+                return
+
+            try:
+                if criar_pdf_invoice(id_pedido_str, pedido, values[26], values[25], values[24]):
+                    logger.info(f"PDF gerado com sucesso para pedido {id_pedido_str} (Agendado)")
+            except Exception as e:
+                logger.error(f"Erro ao gerar PDF para pedido {id_pedido_str} (Agendado): {str(e)}")
+
+            addressFull = f"{pedido['billing']['address_1']}, {values[13]} / {pedido['billing']['address_2']}, {pedido['billing']['neighborhood']} - {pedido['billing']['city']} | Cep: {pedido['billing']['postcode']}"
+            enviar_mensagem_cliente(values, pedido, addressFull, values[18])
+
+            registered_orders.add(id_pedido_str)
+            update_registered_orders(registered_orders, registered_orders_file)
             return
 
         store_final = (values[18] or "").strip().lower()
@@ -952,18 +967,6 @@ def adicionar_pedido_ao_google_sheets(pedido, registered_orders, sheet, sheetAge
         hora_fecha_cd = datetime.strptime("21:00", "%H:%M").time()
         addressFull = f"{pedido['billing']['address_1']}, {values[13]} / {pedido['billing']['address_2']}, {pedido['billing']['neighborhood']} - {pedido['billing']['city']} | Cep: {pedido['billing']['postcode']}"
 
-        scheduled_date = values[26]
-        is_future_date = False
-        if scheduled_date:
-            try:
-                scheduled_date_dt = datetime.strptime(scheduled_date, "%Y-%m-%d").date()
-                tz = pytz.timezone('America/Sao_Paulo')
-                is_future_date = scheduled_date_dt > datetime.now(tz).date()
-            except ValueError:
-                logger.warning(f"Data de agendamento inválida para pedido {id_pedido_str}: {scheduled_date}")
-                is_future_date = False
-
-        # ---------- Fluxo CD Barreiro ----------
         if store_final in ["unidade barreiro", "barreiro", "cd barreiro", "unidadebarreiro"]:
             dia_str = "segunda a sexta" if pedido_dia_semana in range(0,
                                                                       5) else "sábado" if pedido_dia_semana == 5 else "domingo"
@@ -972,7 +975,6 @@ def adicionar_pedido_ao_google_sheets(pedido, registered_orders, sheet, sheetAge
 
             target_sheet = sheetCDBarreiro
 
-            # Verifica se o pedido já existe na aba (coluna A)
             column_a = target_sheet.col_values(1)
             if id_pedido_str in column_a:
                 logger.info(
@@ -981,17 +983,14 @@ def adicionar_pedido_ao_google_sheets(pedido, registered_orders, sheet, sheetAge
                 update_registered_orders(registered_orders, registered_orders_file)
                 return
 
-            # Calcular próxima linha baseada na coluna A
             next_row = len(target_sheet.col_values(1)) + 1
 
             try:
                 if hora_limite <= pedido_hora < hora_fecha_cd or pedido_hora >= hora_fecha_cd:
-                    # Forçar como Agendado para horários tardios
                     values[10] = "Agendado"
-                    if not values[26]:  # Se não tiver data, agenda para amanhã
+                    if not values[26]:
                         values[26] = (pedido_datetime + timedelta(days=1)).strftime("%Y-%m-%d")
 
-                # Escreve com template (mantém dropdowns e formatação)
                 write_row_with_template(service, spreadsheet_key, "CD Barreiro", next_row, values, template_row=2)
                 logger.info(f"Pedido {id_pedido_str} inserido na aba 'CD Barreiro', linha {next_row}")
 
@@ -999,14 +998,13 @@ def adicionar_pedido_ao_google_sheets(pedido, registered_orders, sheet, sheetAge
 
                 registered_orders.add(id_pedido_str)
                 update_registered_orders(registered_orders, registered_orders_file)
-                return  # Garante parada aqui em sucesso
+                return
             except Exception as e:
                 logger.error(f"Erro no fluxo CD Barreiro para pedido {id_pedido_str}: {str(e)}")
-                registered_orders.add(id_pedido_str)  # Marca como registrado mesmo em erro
+                registered_orders.add(id_pedido_str)
                 update_registered_orders(registered_orders, registered_orders_file)
                 return
 
-        # ---------- Fluxo CD Sion ----------
         elif store_final in ["unidade sion", "sion", "cd sion", "unidadesion"]:
             dia_str = "segunda a sexta" if pedido_dia_semana in range(0,
                                                                       5) else "sábado" if pedido_dia_semana == 5 else "domingo"
@@ -1015,7 +1013,6 @@ def adicionar_pedido_ao_google_sheets(pedido, registered_orders, sheet, sheetAge
 
             target_sheet = sheetCDSion
 
-            # Verifica se o pedido já existe na aba (coluna A)
             column_a = target_sheet.col_values(1)
             if id_pedido_str in column_a:
                 logger.info(
@@ -1024,17 +1021,14 @@ def adicionar_pedido_ao_google_sheets(pedido, registered_orders, sheet, sheetAge
                 update_registered_orders(registered_orders, registered_orders_file)
                 return
 
-            # Calcular próxima linha baseada na coluna A
             next_row = len(target_sheet.col_values(1)) + 1
 
             try:
                 if hora_limite <= pedido_hora < hora_fecha_cd or pedido_hora >= hora_fecha_cd:
-                    # Forçar como Agendado para horários tardios
                     values[10] = "Agendado"
-                    if not values[26]:  # Se não tiver data, agenda para amanhã
+                    if not values[26]:
                         values[26] = (pedido_datetime + timedelta(days=1)).strftime("%Y-%m-%d")
 
-                # Escreve com template (mantém dropdowns e formatação)
                 write_row_with_template(service, spreadsheet_key, "CD Sion", next_row, values, template_row=2)
 
                 logger.info(f"Pedido {id_pedido_str} inserido na aba 'CD Sion', linha {next_row}")
@@ -1046,11 +1040,10 @@ def adicionar_pedido_ao_google_sheets(pedido, registered_orders, sheet, sheetAge
                 return
             except Exception as e:
                 logger.error(f"Erro no fluxo CD Sion para pedido {id_pedido_str}: {str(e)}")
-                registered_orders.add(id_pedido_str)  # Marca como registrado mesmo em erro
+                registered_orders.add(id_pedido_str)
                 update_registered_orders(registered_orders, registered_orders_file)
                 return
 
-        # ---------- Fluxo Matriz / Normal ----------
         else:
             pedido_dict = getDictPedidos(values)
             try:
@@ -1069,7 +1062,6 @@ def adicionar_pedido_ao_google_sheets(pedido, registered_orders, sheet, sheetAge
                 sheet_title = "Agendados"
                 target_sheet = sheetAgendado
 
-                # Verifica se já existe
                 column_a = target_sheet.col_values(1)
                 if id_pedido_str in column_a:
                     logger.info(f"Pedido {id_pedido_str} já existe na aba 'Agendados', ignorando inserção.")
@@ -1109,7 +1101,6 @@ def adicionar_pedido_ao_google_sheets(pedido, registered_orders, sheet, sheetAge
                     logger.error(f"Erro ao inserir pedido {id_pedido_str} na aba 'Novos Pedidos': {str(e)}")
                     return
 
-                # Geração de PDF
                 try:
                     logger.debug(f"Tentando gerar PDF para pedido {id_pedido_str}")
                     if criar_pdf_invoice(id_pedido_str, pedido, values[26], values[25], values[24]):
@@ -1126,7 +1117,7 @@ def adicionar_pedido_ao_google_sheets(pedido, registered_orders, sheet, sheetAge
         logger.error(f"Falha ao processar pedido {id_pedido_str}: {str(e)}")
 
 def main():
-    spreadsheet_key = "1dYwkJXVHXXx__cYMd-xUoWnDNZd58xIvKVfLHJMYF_c"  # Substitua pelo ID da sua planilha
+    spreadsheet_key = "1dYwkJXVHXXx__cYMd-xUoWnDNZd58xIvKVfLHJMYF_c"
     credentials_file = 'C:/Users/ESCRITORIO/PycharmProjects/Delivery 2.0/impressao-belvedere-8a876abef441.json'
     registered_orders_file = "registered_orders.json"
 
@@ -1136,11 +1127,9 @@ def main():
             credentials_file, scopes=['https://www.googleapis.com/auth/spreadsheets']
         ))
 
-        # Blindagem: força colunas críticas como texto (B=2, AA=27, W=23)
         for aba in ["Novos Pedidos", "Agendados", "CD Barreiro", "CD Sion"]:
             set_columns_as_text(service, spreadsheet_key, aba, columns=(2, 27, 23))
 
-        # Abertura das abas
         sheet = client.open_by_key(spreadsheet_key).worksheet("Novos Pedidos")
         sheetAgendado = client.open_by_key(spreadsheet_key).worksheet("Agendados")
         sheetCDBarreiro = client.open_by_key(spreadsheet_key).worksheet("CD Barreiro")
@@ -1150,17 +1139,14 @@ def main():
         logger.error(f"Erro ao inicializar planilha ou serviço: {str(e)}")
         return
 
-    # Carrega pedidos já registrados
-    registered_orders = load_registered_orders(registered_orders_file)  # <- strings normalizadas
+    registered_orders = load_registered_orders(registered_orders_file)
 
-    # Busca novos pedidos do WooCommerce
     pedidos = fetch_orders()
     for pedido in pedidos:
         adicionar_pedido_ao_google_sheets(
             pedido, registered_orders, sheet, sheetAgendado, sheetCDBarreiro, sheetCDSion,
             spreadsheet_key, client, registered_orders_file
         )
-
 
 if __name__ == "__main__":
     main()
