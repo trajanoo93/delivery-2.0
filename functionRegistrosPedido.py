@@ -37,8 +37,8 @@ def _get_sheet_props(service, spreadsheet_id, title):
             return p["sheetId"], grid.get("rowCount", 1000), grid.get("columnCount", 26)
     raise ValueError(f"Aba '{title}' não encontrada")
 def write_row_with_template(
-    service, spreadsheet_id, sheet_title, row_index, values,
-    template_row=2, total_cols=None, text_cols=(2, 27)
+        service, spreadsheet_id, sheet_title, row_index, values,
+        template_row=2, total_cols=None, text_cols=(2, 27)
 ):
     # Define range
     range_end_col = total_cols if total_cols is not None else len(values)
@@ -53,10 +53,10 @@ def write_row_with_template(
     # 1) Copiar FORMATAÇÃO + VALIDAÇÃO da linha template para a linha destino
     sheet_id, _, _ = _get_sheet_props(service, spreadsheet_id, sheet_title)
     copy_src = {"sheetId": sheet_id,
-                "startRowIndex": template_row-1, "endRowIndex": template_row,
+                "startRowIndex": template_row - 1, "endRowIndex": template_row,
                 "startColumnIndex": 0, "endColumnIndex": range_end_col}
     copy_dst = {"sheetId": sheet_id,
-                "startRowIndex": row_index-1, "endRowIndex": row_index,
+                "startRowIndex": row_index - 1, "endRowIndex": row_index,
                 "startColumnIndex": 0, "endColumnIndex": range_end_col}
     requests = [
         {"copyPaste": {"source": copy_src, "destination": copy_dst, "pasteType": "PASTE_FORMAT"}},
@@ -68,8 +68,8 @@ def write_row_with_template(
             "repeatCell": {
                 "range": {
                     "sheetId": sheet_id,
-                    "startRowIndex": row_index-1, "endRowIndex": row_index,
-                    "startColumnIndex": c-1, "endColumnIndex": c
+                    "startRowIndex": row_index - 1, "endRowIndex": row_index,
+                    "startColumnIndex": c - 1, "endColumnIndex": c
                 },
                 "cell": {"userEnteredFormat": {"numberFormat": {"type": "TEXT"}}},
                 "fields": "userEnteredFormat.numberFormat"
@@ -97,8 +97,7 @@ def set_columns_as_text(service, spreadsheet_id, sheet_title, columns=(2, 27, 23
                     "sheetId": sheet_id,
                     "startRowIndex": 0,
                     "endRowIndex": row_count,
-                    "startColumnIndex": c-1,
-                    "endColumnIndex": c
+                    "startColumnIndex": c - 1, "endColumnIndex": c
                 },
                 "cell": {"userEnteredFormat": {"numberFormat": {"type": "TEXT"}}},
                 "fields": "userEnteredFormat.numberFormat"
@@ -263,10 +262,9 @@ def enviar_mensagem_whatsapp(celular, mensagem):
     if not celular or not celular.isdigit() or len(celular) < 10:
         logger.error(f"Falha ao enviar mensagem WhatsApp: número de celular inválido ({celular})")
         raise ValueError(f"Número de celular inválido: {celular}")
-    # URL da Evolution API (ajuste o host/porta se mudar)
     url = "http://82.25.71.135:8080/message/sendText/central_delivery"
     payload = {
-        "number": celular, # precisa estar no formato 5531999999999
+        "number": celular,
         "text": mensagem
     }
     headers = {
@@ -365,9 +363,18 @@ Desejamos uma excelente experiência com nossos produtos!
         enviar_mensagem_whatsapp(celular, mensagem)
     except Exception as e:
         logger.error(f"Falha ao enviar mensagem ao cliente do pedido {id_pedido}: {str(e)}")
-        enviar_erro_ao_gestor(id_pedido, str(e))
-        raise
 def get_sheets_service(credentials_file):
+    try:
+        with open(credentials_file, 'r') as f:
+            pass # Verifica se o arquivo é acessível
+    except FileNotFoundError:
+        logger.error(f"Arquivo de credenciais não encontrado: {credentials_file}")
+        enviar_erro_ao_gestor("N/A", f"Arquivo de credenciais não encontrado: {credentials_file}")
+        raise
+    except PermissionError:
+        logger.error(f"Sem permissão para acessar o arquivo de credenciais: {credentials_file}")
+        enviar_erro_ao_gestor("N/A", f"Sem permissão para acessar o arquivo de credenciais: {credentials_file}")
+        raise
     try:
         creds = Credentials.from_service_account_file(
             credentials_file, scopes=['https://www.googleapis.com/auth/spreadsheets']
@@ -403,6 +410,7 @@ def processar_pedido_normal(values, pedido, addressFull, sheet, sheetAgendado, i
     id_pedido_str = normalize_id(id_pedido)
     logger.debug(f"Processando pedido {id_pedido_str} com status={values[10]}, data_agendamento={values[26]}")
     values = verificar_valores_dropdown(values, id_pedido_str)
+    # Determina a aba de destino
     if values[10] == 'Agendado' and not checkValidateAgendado(values[26]):
         logger.info(f"Pedido {id_pedido_str} agendado para o futuro, inserido na aba 'Agendados'")
         sheet_title = "Agendados"
@@ -411,10 +419,13 @@ def processar_pedido_normal(values, pedido, addressFull, sheet, sheetAgendado, i
         logger.info(f"Pedido {id_pedido_str} inserido na aba 'Novos Pedidos'")
         sheet_title = "Novos Pedidos"
         target_sheet = sheet
+    # Verifica se o pedido já existe na aba
     column_a = target_sheet.col_values(1)
     if id_pedido_str in column_a:
-        logger.info(f"Pedido {id_pedido_str} já existe na aba '{sheet_title}', ignorando inserção, PDF e envio de mensagem.")
+        logger.info(
+            f"Pedido {id_pedido_str} já existe na aba '{sheet_title}', ignorando inserção, PDF e envio de mensagem.")
         return
+    # Expande colunas da aba, se necessário
     next_row = len(target_sheet.col_values(1)) + 1
     try:
         sheet_metadata = service.spreadsheets().get(spreadsheetId=spreadsheet_key).execute()
@@ -441,6 +452,7 @@ def processar_pedido_normal(values, pedido, addressFull, sheet, sheetAgendado, i
         logger.error(f"Erro ao verificar/expandir colunas da aba '{sheet_title}' para pedido {id_pedido_str}: {str(e)}")
         enviar_erro_ao_gestor(id_pedido_str, str(e))
         return
+    # Insere o pedido na aba
     try:
         write_row_with_template(service, spreadsheet_key, sheet_title, next_row, values, template_row=2)
         logger.info(f"Pedido {id_pedido_str} inserido com sucesso na aba '{sheet_title}', linha {next_row}")
@@ -448,22 +460,28 @@ def processar_pedido_normal(values, pedido, addressFull, sheet, sheetAgendado, i
         logger.error(f"Erro ao inserir pedido {id_pedido_str} na aba '{sheet_title}': {str(e)}")
         enviar_erro_ao_gestor(id_pedido_str, str(e))
         return
-    if sheet_title == "Novos Pedidos":
-        try:
-            logger.debug(f"Tentando gerar PDF para pedido {id_pedido_str}")
-            if criar_pdf_invoice(id_pedido_str, pedido, values[26], values[25], values[24]):
-                logger.info(f"PDF gerado com sucesso para pedido {id_pedido_str}")
-            else:
-                logger.error(f"Falha ao gerar PDF para pedido {id_pedido_str} (função retornou False)")
-                enviar_erro_ao_gestor(id_pedido_str, "Falha ao gerar PDF (função retornou False)")
-        except Exception as e:
-            logger.error(f"Erro ao gerar PDF para pedido {id_pedido_str}: {str(e)}")
-            enviar_erro_ao_gestor(id_pedido_str, str(e))
-        try:
-            enviar_mensagem_cliente(values, pedido, addressFull, values[18])
-        except Exception as e:
-            logger.error(f"Erro ao enviar mensagem WhatsApp para pedido {id_pedido_str}: {str(e)}")
-            enviar_erro_ao_gestor(id_pedido_str, str(e))
+    # Determina o destino para o PDF
+    destination = "CD Central"
+    if values[10] == 'Agendado' and not checkValidateAgendado(values[26]):
+        destination = "CD Central" # Agendados vão para CD Central
+    else:
+        destination = "CD Central" # Novos Pedidos vão para CD Central
+    # Gera PDF para todos os pedidos
+    try:
+        logger.debug(f"Tentando gerar PDF para pedido {id_pedido_str} com destination={destination}")
+        if criar_pdf_invoice(id_pedido_str, pedido, values[26], values[25], values[24], destination=destination):
+            logger.info(f"PDF gerado com sucesso para pedido {id_pedido_str}")
+        else:
+            logger.error(f"Falha ao gerar PDF para pedido {id_pedido_str} (função retornou False)")
+            enviar_erro_ao_gestor(id_pedido_str, "Falha ao gerar PDF (função retornou False)")
+    except Exception as e:
+        logger.error(f"Erro ao gerar PDF para pedido {id_pedido_str}: {str(e)}")
+        enviar_erro_ao_gestor(id_pedido_str, str(e))
+    # Envia mensagem ao cliente
+    try:
+        enviar_mensagem_cliente(values, pedido, addressFull, values[18])
+    except Exception as e:
+        logger.error(f"Erro ao enviar mensagem WhatsApp para pedido {id_pedido_str}: {str(e)}")
 def getDictPedidos(values):
     return {
         'id': values[0], 'nome': values[4], 'total': values[6], 'rua': values[12],
@@ -663,7 +681,8 @@ def check_values(pedido):
                             })
                 else:
                     logger.error(f"Falha ao buscar metadados do produto {product_id}: {resp.status_code} - {resp.text}")
-                    enviar_erro_ao_gestor(id_pedido, f"Falha ao buscar metadados do produto {product_id}: {resp.status_code} - {resp.text}")
+                    enviar_erro_ao_gestor(id_pedido,
+                                          f"Falha ao buscar metadados do produto {product_id}: {resp.status_code} - {resp.text}")
             except requests.RequestException as e:
                 logger.error(f"Erro ao buscar metadados do produto {product_id}: {str(e)}")
                 enviar_erro_ao_gestor(id_pedido, str(e))
@@ -766,7 +785,8 @@ def check_values(pedido):
         data_agendamento,
         None, None, productList_str
     ]
-    values.extend(["", "", coupon_code, coupon_value, coupon_type, gift_card_discount, payment_account_stripe, effective_store_final, payment_account_pagarme])
+    values.extend(["", "", coupon_code, coupon_value, coupon_type, gift_card_discount, payment_account_stripe,
+                   effective_store_final, payment_account_pagarme])
     return values
 def adicionar_pedido_ao_google_sheets(pedido, registered_orders, sheet, sheetAgendado, sheetCDBarreiro, sheetCDSion,
                                       spreadsheet_key, client, registered_orders_file):
@@ -784,7 +804,8 @@ def adicionar_pedido_ao_google_sheets(pedido, registered_orders, sheet, sheetAge
             enviar_erro_ao_gestor(id_pedido_str, "Dados inválidos")
         return
     try:
-        service = get_sheets_service('C:/Users/ESCRITORIO/PycharmProjects/Delivery 2.0/impressao-belvedere-8a876abef441.json')
+        service = get_sheets_service(
+            'C:/Users/ESCRITORIO/PycharmProjects/Delivery 2.0/impressao-belvedere-8a876abef441.json')
     except Exception as e:
         logger.error(f"Falha ao inicializar serviço do Google Sheets para pedido {id_pedido_str}: {str(e)}")
         enviar_erro_ao_gestor(id_pedido_str, str(e))
@@ -792,7 +813,8 @@ def adicionar_pedido_ao_google_sheets(pedido, registered_orders, sheet, sheetAge
     try:
         sheet_metadata = service.spreadsheets().get(spreadsheetId=spreadsheet_key).execute()
         for worksheet in sheet_metadata['sheets']:
-            if worksheet['properties']['title'] in [sheet.title, sheetAgendado.title, sheetCDBarreiro.title, sheetCDSion.title]:
+            if worksheet['properties']['title'] in [sheet.title, sheetAgendado.title, sheetCDBarreiro.title,
+                                                    sheetCDSion.title]:
                 column_count = worksheet['properties']['gridProperties'].get('columnCount', 26)
                 if column_count < len(values):
                     logger.warning(
@@ -833,7 +855,7 @@ def adicionar_pedido_ao_google_sheets(pedido, registered_orders, sheet, sheetAge
             except ValueError:
                 logger.warning(f"Data de agendamento inválida para pedido {id_pedido_str}: {scheduled_date}")
                 enviar_erro_ao_gestor(id_pedido_str, f"Data de agendamento inválida: {scheduled_date}")
-                is_future_date = False
+                return
         store_final = (values[18] or "").strip().lower()
         logger.debug(f"Pedido {id_pedido_str}: store_final normalizado='{store_final}' (repr={repr(store_final)})")
         pedido_datetime = datetime.strptime(pedido['date_created'], "%Y-%m-%dT%H:%M:%S")
@@ -843,10 +865,18 @@ def adicionar_pedido_ao_google_sheets(pedido, registered_orders, sheet, sheetAge
         hora_sab = datetime.strptime("17:00", "%H:%M").time()
         hora_dom = datetime.strptime("13:00", "%H:%M").time()
         hora_fecha_cd = datetime.strptime("21:00", "%H:%M").time()
+
+        # Definição de hora_limite com base no dia da semana
+        if pedido_dia_semana < 5:  # Segunda a Sexta (0-4)
+            hora_limite = hora_seg_sex
+        elif pedido_dia_semana == 5:  # Sábado
+            hora_limite = hora_sab
+        else:  # Domingo (ou fallback)
+            hora_limite = hora_dom
+
         addressFull = f"{pedido['billing']['address_1']}, {values[13]} / {pedido['billing']['address_2']}, {pedido['billing']['neighborhood']} - {pedido['billing']['city']} | Cep: {pedido['billing']['postcode']}"
+        # Determina a aba de destino com base em store_final
         if store_final in ["unidade barreiro", "barreiro", "cd barreiro", "unidadebarreiro"]:
-            dia_str = "segunda a sexta" if pedido_dia_semana in range(0, 5) else "sábado" if pedido_dia_semana == 5 else "domingo"
-            hora_limite = hora_seg_sex if pedido_dia_semana in range(0, 5) else hora_sab if pedido_dia_semana == 5 else hora_dom
             target_sheet = sheetCDBarreiro
             sheet_title = "CD Barreiro"
             column_a = target_sheet.col_values(1)
@@ -857,28 +887,18 @@ def adicionar_pedido_ao_google_sheets(pedido, registered_orders, sheet, sheetAge
                 return
             next_row = len(target_sheet.col_values(1)) + 1
             try:
-                if (hora_limite <= pedido_hora < hora_fecha_cd or pedido_hora >= hora_fecha_cd) and not checkValidateAgendado(values[26]):
+                if (
+                        hora_limite <= pedido_hora < hora_fecha_cd or pedido_hora >= hora_fecha_cd) and not checkValidateAgendado(
+                        values[26]):
                     values[10] = "Agendado"
                     if not values[26]:
                         values[26] = (pedido_datetime + timedelta(days=1)).strftime("%Y-%m-%d")
                 write_row_with_template(service, spreadsheet_key, sheet_title, next_row, values, template_row=2)
                 logger.info(f"Pedido {id_pedido_str} inserido na aba 'CD Barreiro', linha {next_row}")
-                if checkValidateAgendado(values[26]):
-                    try:
-                        logger.debug(f"Tentando gerar PDF para pedido {id_pedido_str}")
-                        if criar_pdf_invoice(id_pedido_str, pedido, values[26], values[25], values[24]):
-                            logger.info(f"PDF gerado com sucesso para pedido {id_pedido_str}")
-                        else:
-                            logger.error(f"Falha ao gerar PDF para pedido {id_pedido_str} (função retornou False)")
-                            enviar_erro_ao_gestor(id_pedido_str, "Falha ao gerar PDF (função retornou False)")
-                    except Exception as e:
-                        logger.error(f"Erro ao gerar PDF para pedido {id_pedido_str}: {str(e)}")
-                        enviar_erro_ao_gestor(id_pedido_str, str(e))
-                    try:
-                        enviar_mensagem_cliente(values, pedido, addressFull, values[18])
-                    except Exception as e:
-                        logger.error(f"Erro ao enviar mensagem WhatsApp para pedido {id_pedido_str}: {str(e)}")
-                        enviar_erro_ao_gestor(id_pedido_str, str(e))
+                try:
+                    enviar_mensagem_cliente(values, pedido, addressFull, values[18])
+                except Exception as e:
+                    logger.error(f"Erro ao enviar mensagem WhatsApp para pedido {id_pedido_str}: {str(e)}")
                 registered_orders.add(id_pedido_str)
                 update_registered_orders(registered_orders, registered_orders_file)
                 return
@@ -889,8 +909,6 @@ def adicionar_pedido_ao_google_sheets(pedido, registered_orders, sheet, sheetAge
                 update_registered_orders(registered_orders, registered_orders_file)
                 return
         elif store_final in ["unidade sion", "sion", "cd sion", "unidadesion"]:
-            dia_str = "segunda a sexta" if pedido_dia_semana in range(0, 5) else "sábado" if pedido_dia_semana == 5 else "domingo"
-            hora_limite = hora_seg_sex if pedido_dia_semana in range(0, 5) else hora_sab if pedido_dia_semana == 5 else hora_dom
             target_sheet = sheetCDSion
             sheet_title = "CD Sion"
             column_a = target_sheet.col_values(1)
@@ -901,12 +919,47 @@ def adicionar_pedido_ao_google_sheets(pedido, registered_orders, sheet, sheetAge
                 return
             next_row = len(target_sheet.col_values(1)) + 1
             try:
-                if (hora_limite <= pedido_hora < hora_fecha_cd or pedido_hora >= hora_fecha_cd) and not checkValidateAgendado(values[26]):
+                if (
+                        hora_limite <= pedido_hora < hora_fecha_cd or pedido_hora >= hora_fecha_cd) and not checkValidateAgendado(
+                        values[26]):
                     values[10] = "Agendado"
                     if not values[26]:
                         values[26] = (pedido_datetime + timedelta(days=1)).strftime("%Y-%m-%d")
                 write_row_with_template(service, spreadsheet_key, sheet_title, next_row, values, template_row=2)
                 logger.info(f"Pedido {id_pedido_str} inserido na aba 'CD Sion', linha {next_row}")
+                try:
+                    enviar_mensagem_cliente(values, pedido, addressFull, values[18])
+                except Exception as e:
+                    logger.error(f"Erro ao enviar mensagem WhatsApp para pedido {id_pedido_str}: {str(e)}")
+                registered_orders.add(id_pedido_str)
+                update_registered_orders(registered_orders, registered_orders_file)
+                return
+            except Exception as e:
+                logger.error(f"Erro no fluxo CD Sion para pedido {id_pedido_str}: {str(e)}")
+                enviar_erro_ao_gestor(id_pedido_str, str(e))
+                registered_orders.add(id_pedido_str)
+                update_registered_orders(registered_orders, registered_orders_file)
+                return
+        else:
+            if is_future_date or (pedido_hora >= hora_fecha_cd and not values[26]):
+                if pedido_hora >= hora_fecha_cd and not is_future_date and not values[26]:
+                    values[26] = (pedido_datetime + timedelta(days=1)).strftime("%Y-%m-%d")
+                    values[10] = "Agendado"
+                target_sheet = sheetAgendado
+                sheet_title = "Agendados"
+            else:
+                target_sheet = sheet
+                sheet_title = "Novos Pedidos"
+            column_a = target_sheet.col_values(1)
+            if id_pedido_str in column_a:
+                logger.info(f"Pedido {id_pedido_str} já existe na aba '{sheet_title}', ignorando inserção.")
+                registered_orders.add(id_pedido_str)
+                update_registered_orders(registered_orders, registered_orders_file)
+                return
+            next_row = len(target_sheet.col_values(1)) + 1
+            try:
+                write_row_with_template(service, spreadsheet_key, sheet_title, next_row, values, template_row=2)
+                logger.info(f"Pedido {id_pedido_str} inserido na aba '{sheet_title}', linha {next_row}")
                 if checkValidateAgendado(values[26]):
                     try:
                         logger.debug(f"Tentando gerar PDF para pedido {id_pedido_str}")
@@ -918,109 +971,25 @@ def adicionar_pedido_ao_google_sheets(pedido, registered_orders, sheet, sheetAge
                     except Exception as e:
                         logger.error(f"Erro ao gerar PDF para pedido {id_pedido_str}: {str(e)}")
                         enviar_erro_ao_gestor(id_pedido_str, str(e))
-                    try:
-                        enviar_mensagem_cliente(values, pedido, addressFull, values[18])
-                    except Exception as e:
-                        logger.error(f"Erro ao enviar mensagem WhatsApp para pedido {id_pedido_str}: {str(e)}")
-                        enviar_erro_ao_gestor(id_pedido_str, str(e))
-                registered_orders.add(id_pedido_str)
-                update_registered_orders(registered_orders, registered_orders_file)
-                return
-            except Exception as e:
-                logger.error(f"Erro no fluxo CD Sion para pedido {id_pedido_str}: {str(e)}")
-                enviar_erro_ao_gestor(id_pedido_str, str(e))
-                registered_orders.add(id_pedido_str)
-                update_registered_orders(registered_orders, registered_orders_file)
-                return
-        else:
-            pedido_dict = getDictPedidos(values)
-            try:
-                assert values[5] in [
-                    'V.A', 'Cartão', 'Pix', 'Dinheiro', 'Crédito Site', 'Cartão Presente Ao Gosto Card',
-                    'Sem método de pagamento'
-                ], f"Método de pagamento inesperado: {values[5]}"
-            except AssertionError as e:
-                logger.error(f"Falha ao processar pedido {id_pedido_str}: {str(e)}")
-                enviar_erro_ao_gestor(id_pedido_str, str(e))
-                return
-            if is_future_date or (pedido_hora >= hora_fecha_cd and not values[26]):
-                if pedido_hora >= hora_fecha_cd and not is_future_date and not values[26]:
-                    values[26] = (pedido_datetime + timedelta(days=1)).strftime("%Y-%m-%d")
-                if pedido_hora >= hora_fecha_cd and not is_future_date and not values[26]:
-                    values[10] = "Agendado"
-                sheet_title = "Agendados"
-                target_sheet = sheetAgendado
-                column_a = target_sheet.col_values(1)
-                if id_pedido_str in column_a:
-                    logger.info(f"Pedido {id_pedido_str} já existe na aba 'Agendados', ignorando inserção.")
-                    registered_orders.add(id_pedido_str)
-                    update_registered_orders(registered_orders, registered_orders_file)
-                    return
-                next_row = len(target_sheet.col_values(1)) + 1
-                try:
-                    write_row_with_template(service, spreadsheet_key, sheet_title, next_row, values, template_row=2)
-                    logger.info(f"Pedido {id_pedido_str} inserido na aba 'Agendados', linha {next_row}")
-                    # Adicionar geração de PDF apenas se for para o dia atual
-                    if checkValidateAgendado(values[26]):
-                        try:
-                            logger.debug(f"Tentando gerar PDF para pedido {id_pedido_str}")
-                            if criar_pdf_invoice(id_pedido_str, pedido, values[26], values[25], values[24]):
-                                logger.info(f"PDF gerado com sucesso para pedido {id_pedido_str}")
-                            else:
-                                logger.error(f"Falha ao gerar PDF para pedido {id_pedido_str} (função retornou False)")
-                                enviar_erro_ao_gestor(id_pedido_str, "Falha ao gerar PDF (função retornou False)")
-                        except Exception as e:
-                            logger.error(f"Erro ao gerar PDF para pedido {id_pedido_str}: {str(e)}")
-                            enviar_erro_ao_gestor(id_pedido_str, str(e))
-                    # Enviar mensagem ao cliente, se aplicável
-                    try:
-                        enviar_mensagem_cliente(values, pedido, addressFull, values[18])
-                    except Exception as e:
-                        logger.error(f"Erro ao enviar mensagem WhatsApp para pedido {id_pedido_str}: {str(e)}")
-                        # Não chama enviar_erro_ao_gestor, apenas registra o erro
-                    registered_orders.add(id_pedido_str)
-                    update_registered_orders(registered_orders, registered_orders_file)
-                except Exception as e:
-                    logger.error(f"Erro ao inserir pedido {id_pedido_str} na aba 'Agendados': {str(e)}")
-                    enviar_erro_ao_gestor(id_pedido_str, str(e))
-                    return
-            else:
-                sheet_title = "Novos Pedidos"
-                target_sheet = sheet
-                column_a = target_sheet.col_values(1)
-                if id_pedido_str in column_a:
-                    logger.info(f"Pedido {id_pedido_str} já existe na aba 'Novos Pedidos', ignorando inserção.")
-                    registered_orders.add(id_pedido_str)
-                    update_registered_orders(registered_orders, registered_orders_file)
-                    return
-                next_row = len(target_sheet.col_values(1)) + 1
-                try:
-                    write_row_with_template(service, spreadsheet_key, sheet_title, next_row, values, template_row=2)
-                    logger.info(f"Pedido {id_pedido_str} inserido na aba 'Novos Pedidos', linha {next_row}")
-                except Exception as e:
-                    logger.error(f"Erro ao inserir pedido {id_pedido_str} na aba 'Novos Pedidos': {str(e)}")
-                    enviar_erro_ao_gestor(id_pedido_str, str(e))
-                    return
-                try:
-                    logger.debug(f"Tentando gerar PDF para pedido {id_pedido_str}")
-                    if criar_pdf_invoice(id_pedido_str, pedido, values[26], values[25], values[24]):
-                        logger.info(f"PDF gerado com sucesso para pedido {id_pedido_str}")
-                    else:
-                        logger.error(f"Falha ao gerar PDF para pedido {id_pedido_str} (função retornou False)")
-                        enviar_erro_ao_gestor(id_pedido_str, "Falha ao gerar PDF (função retornou False)")
-                except Exception as e:
-                    logger.error(f"Erro ao gerar PDF para pedido {id_pedido_str}: {str(e)}")
-                    enviar_erro_ao_gestor(id_pedido_str, str(e))
                 try:
                     enviar_mensagem_cliente(values, pedido, addressFull, values[18])
                 except Exception as e:
                     logger.error(f"Erro ao enviar mensagem WhatsApp para pedido {id_pedido_str}: {str(e)}")
-                    enviar_erro_ao_gestor(id_pedido_str, str(e))
                 registered_orders.add(id_pedido_str)
                 update_registered_orders(registered_orders, registered_orders_file)
+                return
+            except Exception as e:
+                logger.error(f"Erro ao inserir pedido {id_pedido_str} na aba '{sheet_title}': {str(e)}")
+                enviar_erro_ao_gestor(id_pedido_str, str(e))
+                registered_orders.add(id_pedido_str)
+                update_registered_orders(registered_orders, registered_orders_file)
+                return
     except Exception as e:
         logger.error(f"Falha ao processar pedido {id_pedido_str}: {str(e)}")
         enviar_erro_ao_gestor(id_pedido_str, str(e))
+        registered_orders.add(id_pedido_str)
+        update_registered_orders(registered_orders, registered_orders_file)
+
 def main():
     spreadsheet_key = "1dYwkJXVHXXx__cYMd-xUoWnDNZd58xIvKVfLHJMYF_c"
     credentials_file = 'C:/Users/ESCRITORIO/PycharmProjects/Delivery 2.0/impressao-belvedere-8a876abef441.json'
