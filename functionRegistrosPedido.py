@@ -290,13 +290,14 @@ def enviar_erro_ao_gestor(id_pedido, erro):
         logger.error(f"Falha ao enviar mensagem de erro ao gestor para o pedido {id_pedido}: {str(e)}")
 def enviar_mensagem_cliente(values, pedido, addressFull, unidade_retirada):
     id_pedido = pedido['id']
+    id_pedido_str = normalize_id(id_pedido)  # Garante que o ID é uma string
     user_name = values[4]
     if not user_name:
-        logger.error(f"Falha ao enviar mensagem ao cliente do pedido {id_pedido}: nome não definido")
+        logger.error(f"Falha ao enviar mensagem ao cliente do pedido {id_pedido_str}: nome não definido")
         raise ValueError("Nome do cliente não definido")
     celular = pedido['billing']['phone']
     if not celular:
-        logger.error(f"Falha ao enviar mensagem ao cliente do pedido {id_pedido}: celular não definido")
+        logger.error(f"Falha ao enviar mensagem ao cliente do pedido {id_pedido_str}: celular não definido")
         raise ValueError("Número de celular não definido")
     celular = ''.join(filter(str.isdigit, celular.lstrip('+55').lstrip('55')))
     if not celular.startswith("55"):
@@ -306,7 +307,7 @@ def enviar_mensagem_cliente(values, pedido, addressFull, unidade_retirada):
             if unidade_retirada == "Central Distribuição (Sagrada Família)":
                 mensagem = f"""
 Olá {user_name}! 👋
-Seu pedido chegou aqui na Ao Gosto Carnes e já está sendo montado. 🥩📦
+Seu pedido *#{id_pedido_str}* chegou aqui na Ao Gosto Carnes e já está sendo montado. 🥩📦
 Pedimos um prazo de 30 minutos para montar o pedido. 😊
 ⚠️ *Mensagem automática — não responda por aqui*. Para falar com nossa equipe, utilize a Central Oficial: *(31) 3461-3297*.
 📍Retirada: Av. Silviano Brandão, 685, Sagrada Família. (Basta subir o portão grande de garagem, temos estacionamento!)
@@ -315,7 +316,7 @@ Ah, lembramos que os pedidos para retirada são guardados somente até o final d
             elif unidade_retirada == "Unidade Barreiro":
                 mensagem = f"""
 Olá {user_name}! 👋
-Seu pedido foi recebido pela *Ao Gosto Carnes* e já está em preparação! 🥩📦
+Seu pedido *#{id_pedido_str}* foi recebido pela *Ao Gosto Carnes* e já está em preparação! 🥩📦
 Pedimos um prazo de 30 minutos para montá-lo. 😊
 Caso tenha alguma dúvida, envie uma mensagem para a nossa Unidade do Barreiro: *(31) 99534-8704*
 _Informações de Retirada:_
@@ -328,7 +329,7 @@ Obrigado por escolher a *Ao Gosto Carnes*!
             elif unidade_retirada == "Unidade Sion":
                 mensagem = f"""
 Olá {user_name}! 👋
-Seu pedido foi recebido pela *Ao Gosto Carnes* e já está em preparação! 🥩📦
+Seu pedido *#{id_pedido_str}* foi recebido pela *Ao Gosto Carnes* e já está em preparação! 🥩📦
 Pedimos um prazo de 30 minutos para montá-lo. 😊
 Para falar na Unidade Sion, basta chamar nesse número: *(31) 9 8311-2919*.
 _Informações de Retirada:_
@@ -341,7 +342,7 @@ Obrigado por escolher a *Ao Gosto Carnes*!
             else:
                 mensagem = f"""
 Olá {user_name}! 👋
-Seu pedido chegou aqui na Ao Gosto Carnes e já está sendo montado. 🥩📦
+Seu pedido *#{id_pedido_str}* chegou aqui na Ao Gosto Carnes e já está sendo montado. 🥩📦
 📍Retirada: Av. Silviano Brandão, 685, Sagrada Família. (Basta subir o portão grande de garagem, temos estacionamento!)
 ⚠️ *Mensagem automática — não responda por aqui*.
 Para falar com nossa equipe, utilize a central oficial: *(31) 3461-3297*.
@@ -349,7 +350,7 @@ Para falar com nossa equipe, utilize a central oficial: *(31) 3461-3297*.
         else:
             mensagem = f"""
 Ei {user_name}! 👋
-Seu pedido na Ao Gosto Carnes foi *confirmado* e já estamos preparando tudo.
+Seu pedido #{id_pedido_str} na Ao Gosto Carnes foi *confirmado* e já estamos preparando tudo.
 Aqui está o endereço de entrega:
 📍 *{addressFull}*
 ⚠️ *Mensagem automática — não responda por aqui*.
@@ -359,10 +360,10 @@ Se o endereço está correto, em breve sua caixinha laranja estará aí com voc�
 Estamos empenhados em entregar o mais rápido possível! 😊
 Desejamos uma excelente experiência com nossos produtos!
             """.strip()
-        logger.info(f"Enviando mensagem ao cliente do pedido {id_pedido}")
+        logger.info(f"Enviando mensagem ao cliente do pedido {id_pedido_str}")
         enviar_mensagem_whatsapp(celular, mensagem)
     except Exception as e:
-        logger.error(f"Falha ao enviar mensagem ao cliente do pedido {id_pedido}: {str(e)}")
+        logger.error(f"Falha ao enviar mensagem ao cliente do pedido {id_pedido_str}: {str(e)}")
 def get_sheets_service(credentials_file):
     try:
         with open(credentials_file, 'r') as f:
@@ -460,23 +461,19 @@ def processar_pedido_normal(values, pedido, addressFull, sheet, sheetAgendado, i
         logger.error(f"Erro ao inserir pedido {id_pedido_str} na aba '{sheet_title}': {str(e)}")
         enviar_erro_ao_gestor(id_pedido_str, str(e))
         return
-    # Determina o destino para o PDF
-    destination = "CD Central"
-    if values[10] == 'Agendado' and not checkValidateAgendado(values[26]):
-        destination = "CD Central" # Agendados vão para CD Central
+    if sheet_title in ["Novos Pedidos", "Agendados"]:
+        try:
+            logger.debug(f"Tentando gerar PDF para pedido {id_pedido_str}")
+            if criar_pdf_invoice(id_pedido_str, pedido, values[26], values[25], values[24]):
+                logger.info(f"PDF gerado com sucesso para pedido {id_pedido_str}")
+            else:
+                logger.error(f"Falha ao gerar PDF para pedido {id_pedido_str} (função retornou False)")
+                enviar_erro_ao_gestor(id_pedido_str, "Falha ao gerar PDF (função retornou False)")
+        except Exception as e:
+            logger.error(f"Erro ao gerar PDF para pedido {id_pedido_str}: {str(e)}")
+            enviar_erro_ao_gestor(id_pedido_str, str(e))
     else:
-        destination = "CD Central" # Novos Pedidos vão para CD Central
-    # Gera PDF para todos os pedidos
-    try:
-        logger.debug(f"Tentando gerar PDF para pedido {id_pedido_str} com destination={destination}")
-        if criar_pdf_invoice(id_pedido_str, pedido, values[26], values[25], values[24], destination=destination):
-            logger.info(f"PDF gerado com sucesso para pedido {id_pedido_str}")
-        else:
-            logger.error(f"Falha ao gerar PDF para pedido {id_pedido_str} (função retornou False)")
-            enviar_erro_ao_gestor(id_pedido_str, "Falha ao gerar PDF (função retornou False)")
-    except Exception as e:
-        logger.error(f"Erro ao gerar PDF para pedido {id_pedido_str}: {str(e)}")
-        enviar_erro_ao_gestor(id_pedido_str, str(e))
+        logger.debug(f"PDF não gerado para pedido {id_pedido_str} (aba externa: {sheet_title})")
     # Envia mensagem ao cliente
     try:
         enviar_mensagem_cliente(values, pedido, addressFull, values[18])
@@ -840,9 +837,6 @@ def adicionar_pedido_ao_google_sheets(pedido, registered_orders, sheet, sheetAge
     values = verificar_valores_dropdown(values, id_pedido_str)
     logger.debug(f"Valores para pedido {id_pedido_str}: {values}")
     try:
-        if id_pedido_str in registered_orders:
-            logger.info(f"Pedido {id_pedido_str} já registrado, ignorando (dedup)")
-            return
         scheduled_date = values[26]
         is_future_date = False
         if scheduled_date:
@@ -882,8 +876,6 @@ def adicionar_pedido_ao_google_sheets(pedido, registered_orders, sheet, sheetAge
             column_a = target_sheet.col_values(1)
             if id_pedido_str in column_a:
                 logger.info(f"Pedido {id_pedido_str} já existe na aba 'CD Barreiro', ignorando inserção.")
-                registered_orders.add(id_pedido_str)
-                update_registered_orders(registered_orders, registered_orders_file)
                 return
             next_row = len(target_sheet.col_values(1)) + 1
             try:
@@ -895,18 +887,11 @@ def adicionar_pedido_ao_google_sheets(pedido, registered_orders, sheet, sheetAge
                         values[26] = (pedido_datetime + timedelta(days=1)).strftime("%Y-%m-%d")
                 write_row_with_template(service, spreadsheet_key, sheet_title, next_row, values, template_row=2)
                 logger.info(f"Pedido {id_pedido_str} inserido na aba 'CD Barreiro', linha {next_row}")
-                try:
-                    enviar_mensagem_cliente(values, pedido, addressFull, values[18])
-                except Exception as e:
-                    logger.error(f"Erro ao enviar mensagem WhatsApp para pedido {id_pedido_str}: {str(e)}")
                 registered_orders.add(id_pedido_str)
                 update_registered_orders(registered_orders, registered_orders_file)
-                return
             except Exception as e:
                 logger.error(f"Erro no fluxo CD Barreiro para pedido {id_pedido_str}: {str(e)}")
                 enviar_erro_ao_gestor(id_pedido_str, str(e))
-                registered_orders.add(id_pedido_str)
-                update_registered_orders(registered_orders, registered_orders_file)
                 return
         elif store_final in ["unidade sion", "sion", "cd sion", "unidadesion"]:
             target_sheet = sheetCDSion
@@ -914,8 +899,6 @@ def adicionar_pedido_ao_google_sheets(pedido, registered_orders, sheet, sheetAge
             column_a = target_sheet.col_values(1)
             if id_pedido_str in column_a:
                 logger.info(f"Pedido {id_pedido_str} já existe na aba 'CD Sion', ignorando inserção.")
-                registered_orders.add(id_pedido_str)
-                update_registered_orders(registered_orders, registered_orders_file)
                 return
             next_row = len(target_sheet.col_values(1)) + 1
             try:
@@ -927,18 +910,11 @@ def adicionar_pedido_ao_google_sheets(pedido, registered_orders, sheet, sheetAge
                         values[26] = (pedido_datetime + timedelta(days=1)).strftime("%Y-%m-%d")
                 write_row_with_template(service, spreadsheet_key, sheet_title, next_row, values, template_row=2)
                 logger.info(f"Pedido {id_pedido_str} inserido na aba 'CD Sion', linha {next_row}")
-                try:
-                    enviar_mensagem_cliente(values, pedido, addressFull, values[18])
-                except Exception as e:
-                    logger.error(f"Erro ao enviar mensagem WhatsApp para pedido {id_pedido_str}: {str(e)}")
                 registered_orders.add(id_pedido_str)
                 update_registered_orders(registered_orders, registered_orders_file)
-                return
             except Exception as e:
                 logger.error(f"Erro no fluxo CD Sion para pedido {id_pedido_str}: {str(e)}")
                 enviar_erro_ao_gestor(id_pedido_str, str(e))
-                registered_orders.add(id_pedido_str)
-                update_registered_orders(registered_orders, registered_orders_file)
                 return
         else:
             if is_future_date or (pedido_hora >= hora_fecha_cd and not values[26]):
@@ -953,42 +929,43 @@ def adicionar_pedido_ao_google_sheets(pedido, registered_orders, sheet, sheetAge
             column_a = target_sheet.col_values(1)
             if id_pedido_str in column_a:
                 logger.info(f"Pedido {id_pedido_str} já existe na aba '{sheet_title}', ignorando inserção.")
-                registered_orders.add(id_pedido_str)
-                update_registered_orders(registered_orders, registered_orders_file)
                 return
             next_row = len(target_sheet.col_values(1)) + 1
             try:
                 write_row_with_template(service, spreadsheet_key, sheet_title, next_row, values, template_row=2)
                 logger.info(f"Pedido {id_pedido_str} inserido na aba '{sheet_title}', linha {next_row}")
-                if checkValidateAgendado(values[26]):
-                    try:
-                        logger.debug(f"Tentando gerar PDF para pedido {id_pedido_str}")
-                        if criar_pdf_invoice(id_pedido_str, pedido, values[26], values[25], values[24]):
-                            logger.info(f"PDF gerado com sucesso para pedido {id_pedido_str}")
-                        else:
-                            logger.error(f"Falha ao gerar PDF para pedido {id_pedido_str} (função retornou False)")
-                            enviar_erro_ao_gestor(id_pedido_str, "Falha ao gerar PDF (função retornou False)")
-                    except Exception as e:
-                        logger.error(f"Erro ao gerar PDF para pedido {id_pedido_str}: {str(e)}")
-                        enviar_erro_ao_gestor(id_pedido_str, str(e))
-                try:
-                    enviar_mensagem_cliente(values, pedido, addressFull, values[18])
-                except Exception as e:
-                    logger.error(f"Erro ao enviar mensagem WhatsApp para pedido {id_pedido_str}: {str(e)}")
                 registered_orders.add(id_pedido_str)
                 update_registered_orders(registered_orders, registered_orders_file)
-                return
             except Exception as e:
                 logger.error(f"Erro ao inserir pedido {id_pedido_str} na aba '{sheet_title}': {str(e)}")
                 enviar_erro_ao_gestor(id_pedido_str, str(e))
-                registered_orders.add(id_pedido_str)
-                update_registered_orders(registered_orders, registered_orders_file)
                 return
+
+        # Código refatorado: Geração de PDF apenas para abas centrais
+        if sheet_title in ["Novos Pedidos", "Agendados"]:
+            try:
+                logger.debug(f"Tentando gerar PDF para pedido {id_pedido_str} (aba central: {sheet_title})")
+                if criar_pdf_invoice(id_pedido_str, pedido, values[26], values[25], values[24]):
+                    logger.info(f"PDF gerado com sucesso para pedido {id_pedido_str}")
+                else:
+                    logger.error(f"Falha ao gerar PDF para pedido {id_pedido_str} (função retornou False)")
+                    enviar_erro_ao_gestor(id_pedido_str, "Falha ao gerar PDF (função retornou False)")
+            except Exception as e:
+                logger.error(f"Erro ao gerar PDF para pedido {id_pedido_str}: {str(e)}")
+                enviar_erro_ao_gestor(id_pedido_str, str(e))
+        else:
+            logger.debug(f"PDF não gerado para pedido {id_pedido_str} (aba externa: {sheet_title})")
+
+        # Envio de mensagem (mantido para todas as abas, conforme sua descrição)
+        try:
+            enviar_mensagem_cliente(values, pedido, addressFull, values[18])
+        except Exception as e:
+            logger.error(f"Erro ao enviar mensagem WhatsApp para pedido {id_pedido_str}: {str(e)}")
+
+        return
     except Exception as e:
         logger.error(f"Falha ao processar pedido {id_pedido_str}: {str(e)}")
         enviar_erro_ao_gestor(id_pedido_str, str(e))
-        registered_orders.add(id_pedido_str)
-        update_registered_orders(registered_orders, registered_orders_file)
 
 def main():
     spreadsheet_key = "1dYwkJXVHXXx__cYMd-xUoWnDNZd58xIvKVfLHJMYF_c"
